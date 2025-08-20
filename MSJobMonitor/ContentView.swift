@@ -121,22 +121,164 @@ struct Job: Identifiable, Codable, Equatable {
     }
     
     var cleanDescription: String {
-        // Remove HTML tags and decode entities
-        let withoutTags = description
-            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        // Remove HTML tags but preserve structure
+        var text = description
+            .replacingOccurrences(of: "<br>", with: "\n")
+            .replacingOccurrences(of: "<br/>", with: "\n")
+            .replacingOccurrences(of: "<br />", with: "\n")
+            .replacingOccurrences(of: "</p>", with: "\n\n")
+            .replacingOccurrences(of: "<p>", with: "")
+            .replacingOccurrences(of: "</div>", with: "\n")
+            .replacingOccurrences(of: "<div>", with: "")
+            .replacingOccurrences(of: "<li>", with: "• ")
+            .replacingOccurrences(of: "</li>", with: "\n")
+            .replacingOccurrences(of: "<ul>", with: "\n")
+            .replacingOccurrences(of: "</ul>", with: "\n")
+            .replacingOccurrences(of: "<ol>", with: "\n")
+            .replacingOccurrences(of: "</ol>", with: "\n")
+        
+        // Remove remaining HTML tags
+        text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        text = text
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&quot;", with: "\"")
             .replacingOccurrences(of: "&#39;", with: "'")
             .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&#8217;", with: "'")
+            .replacingOccurrences(of: "&#8220;", with: """
+            )
+            .replacingOccurrences(of: "&#8221;", with:
+            """)
+            .replacingOccurrences(of: "&#8211;", with: "–")
+            .replacingOccurrences(of: "&#8212;", with: "—")
         
-        // Clean up extra whitespace
-        return withoutTags
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = text.components(separatedBy: .newlines)
+        let cleanedLines = lines.map { line in
+            line.trimmingCharacters(in: .whitespaces)
+        }
+        
+        // Remove empty lines
+        var result: [String] = []
+        var previousWasEmpty = false
+        
+        for line in cleanedLines {
+            if line.isEmpty {
+                if !previousWasEmpty && !result.isEmpty {
+                    result.append("")
+                }
+                previousWasEmpty = true
+            } else {
+                result.append(line)
+                previousWasEmpty = false
+            }
+        }
+        
+        return result.joined(separator: "\n")
+    }
+    
+    var overview: String {
+        // Extract the main description before qualifications
+        let text = cleanDescription
+        
+        // Find where qualifications start
+        let qualificationMarkers = [
+            "Required/Minimum Qualifications",
+            "Required Qualifications",
+            "Minimum Qualifications",
+            "Basic Qualifications",
+            "Qualifications"
+        ]
+        
+        var endIndex = text.endIndex
+        for marker in qualificationMarkers {
+            if let range = text.range(of: marker, options: .caseInsensitive) {
+                if range.lowerBound < endIndex {
+                    endIndex = range.lowerBound
+                }
+            }
+        }
+        
+        let overview = String(text[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return overview.isEmpty ? "No description available." : overview
+    }
+    
+    var requiredQualifications: String? {
+        let text = cleanDescription
+        
+        let requiredMarkers = [
+            "Required/Minimum Qualifications",
+            "Required Qualifications",
+            "Minimum Qualifications",
+            "Basic Qualifications"
+        ]
+        
+        for marker in requiredMarkers {
+            if let range = text.range(of: marker, options: .caseInsensitive) {
+                let afterMarker = String(text[range.upperBound...])
+                
+                let endMarkers = [
+                    "Preferred Qualifications",
+                    "Additional Qualifications",
+                    "Preferred/Additional Qualifications",
+                    "Microsoft is an equal opportunity employer"
+                ]
+                
+                var endIndex = afterMarker.endIndex
+                for endMarker in endMarkers {
+                    if let endRange = afterMarker.range(of: endMarker, options: .caseInsensitive) {
+                        if endRange.lowerBound < endIndex {
+                            endIndex = endRange.lowerBound
+                        }
+                    }
+                }
+                
+                let qualifications = String(afterMarker[..<endIndex])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                return qualifications.isEmpty ? nil : qualifications
+            }
+        }
+        
+        return nil
+    }
+    
+    var preferredQualifications: String? {
+        let text = cleanDescription
+        
+        let preferredMarkers = [
+            "Preferred Qualifications",
+            "Additional Qualifications",
+            "Preferred/Additional Qualifications"
+        ]
+        
+        for marker in preferredMarkers {
+            if let range = text.range(of: marker, options: .caseInsensitive) {
+                let afterMarker = String(text[range.upperBound...])
+                
+                let endMarkers = [
+                    "Microsoft is an equal opportunity employer",
+                    "Benefits/perks listed below",
+                    "#LI-"
+                ]
+                
+                var endIndex = afterMarker.endIndex
+                for endMarker in endMarkers {
+                    if let endRange = afterMarker.range(of: endMarker, options: .caseInsensitive) {
+                        if endRange.lowerBound < endIndex {
+                            endIndex = endRange.lowerBound
+                        }
+                    }
+                }
+                
+                let qualifications = String(afterMarker[..<endIndex])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                return qualifications.isEmpty ? nil : qualifications
+            }
+        }
+        return nil
     }
 }
 
@@ -155,6 +297,7 @@ class JobManager: ObservableObject {
     @Published var totalFetchedCount = 0
     @Published var filteredCount = 0
     @Published var totalAvailableJobs = 0
+    @Published var newJobsCount = 0
     
     @AppStorage("jobTitleFilter") var jobTitleFilter = ""
     @AppStorage("locationFilter") var locationFilter = ""
@@ -193,6 +336,7 @@ class JobManager: ObservableObject {
     func fetchJobs() async {
         isLoading = true
         lastError = nil
+        newJobsCount = 0
         
         do {
             let fetcher = MicrosoftJobFetcher()
@@ -210,8 +354,9 @@ class JobManager: ObservableObject {
             filteredCount = recentJobs.count
             print("Filtered to \(recentJobs.count) jobs from last 24 hours")
             
-            // Additional deduplication check for the final list
+            // Deduplicate and find new jobs
             var uniqueJobs: [Job] = []
+            var newJobs: [Job] = []
             var seenIds = Set<String>()
             
             for job in recentJobs.sorted(by: { $0.postingDate > $1.postingDate }) {
@@ -219,23 +364,32 @@ class JobManager: ObservableObject {
                     uniqueJobs.append(job)
                     seenIds.insert(job.id)
                     
-                    // Check if this is a new job for notifications
+                    // Check if this is a new job
                     if !storedJobIds.contains(job.id) {
-                        storedJobIds.insert(job.id)
+                        newJobs.append(job)
+                        print("New job found: \(job.title) - \(job.id)")
                     }
                 }
             }
             
-            // Send grouped notification if there are new jobs
-            let newJobs = uniqueJobs.filter { !storedJobIds.contains($0.id) }
+            // Send notification for new jobs
             if !newJobs.isEmpty {
+                print("Sending notification for \(newJobs.count) new jobs")
                 sendGroupedNotification(for: newJobs)
-                newJobs.forEach { storedJobIds.insert($0.id) }
+                
+                // Add new job IDs to stored set after sending notification
+                for job in newJobs {
+                    storedJobIds.insert(job.id)
+                }
+                
+                newJobsCount = newJobs.count
             }
             
             jobs = uniqueJobs
             saveJobs()
             saveStoredJobIds()
+            
+            print("Stored job IDs count: \(storedJobIds.count)")
             
         } catch {
             lastError = error.localizedDescription
@@ -262,7 +416,13 @@ class JobManager: ObservableObject {
                 trigger: nil
             )
             
-            UNUserNotificationCenter.current().add(request)
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    print("Error sending notification: \(error)")
+                } else {
+                    print("Notification sent for job: \(job.title)")
+                }
+            }
         } else {
             // Multiple jobs - grouped notification
             let content = UNMutableNotificationContent()
@@ -282,7 +442,13 @@ class JobManager: ObservableObject {
                 trigger: nil
             )
             
-            UNUserNotificationCenter.current().add(request)
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    print("Error sending grouped notification: \(error)")
+                } else {
+                    print("Grouped notification sent for \(newJobs.count) jobs")
+                }
+            }
         }
     }
     
@@ -330,6 +496,7 @@ class JobManager: ObservableObject {
         do {
             let data = try JSONEncoder().encode(Array(storedJobIds))
             try data.write(to: storedIdsURL)
+            print("Saved \(storedJobIds.count) stored job IDs")
         } catch {
             print("Failed to save stored IDs: \(error)")
         }
@@ -340,6 +507,7 @@ class JobManager: ObservableObject {
             let data = try Data(contentsOf: storedIdsURL)
             let ids = try JSONDecoder().decode([String].self, from: data)
             storedJobIds = Set(ids)
+            print("Loaded \(storedJobIds.count) stored job IDs")
         } catch {
             print("Failed to load stored IDs: \(error)")
         }
@@ -450,12 +618,14 @@ actor MicrosoftJobFetcher {
     }
     
     private func parseResponse(_ data: Data, page: Int = 1) throws -> [Job] {
-        // Log raw JSON for debugging
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print("=== MICROSOFT API RESPONSE (first 2000 chars) ===")
-            let truncated = String(jsonString.prefix(2000))
-            print(truncated)
-            print("=== END RESPONSE SAMPLE ===")
+        // Only log for first page
+        if page == 1 {
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("=== MICROSOFT API RESPONSE (first 2000 chars) ===")
+                let truncated = String(jsonString.prefix(2000))
+                print(truncated)
+                print("=== END RESPONSE SAMPLE ===")
+            }
         }
         
         let decoder = JSONDecoder()
@@ -463,29 +633,71 @@ actor MicrosoftJobFetcher {
         
         let response = try decoder.decode(MSResponse.self, from: data)
         
-        print("\nTotal jobs found: \(response.operationResult.result.jobs.count)")
-        
-        // Log first job
-        if let firstJob = response.operationResult.result.jobs.first {
-            print("\n=== FIRST JOB DETAILS ===")
-            print("Title: \(firstJob.title)")
-            print("JobId: \(firstJob.jobId)")
-            print("PostingDate: \(firstJob.postingDate)")
-            print("Properties exists: \(firstJob.properties != nil)")
-            if let props = firstJob.properties {
-                print("  Location exists: \(props.location != nil)")
-                if let loc = props.location {
-                    print("    City: \(loc.city ?? "nil")")
-                    print("    State: \(loc.state ?? "nil")")
-                    print("    Country: \(loc.country ?? "nil")")
+        if page == 1 {
+            print("\nTotal jobs available: \(response.operationResult.result.totalJobs ?? 0)")
+            print("Jobs in this page: \(response.operationResult.result.jobs.count)")
+            
+            // Update total available jobs
+            if let total = response.operationResult.result.totalJobs {
+                Task { @MainActor in
+                    JobManager.shared.totalAvailableJobs = total
                 }
-                print("  WorkSiteFlexibility: \(props.workSiteFlexibility ?? "nil")")
-                print("  Description length: \(props.description?.count ?? 0) chars")
             }
-            print("========================")
         }
         
         return response.operationResult.result.jobs.map { msJob in
+            // Common Microsoft office locations for better detection
+            let knownLocations = [
+                "Redmond", "Seattle", "Bellevue", "Mountain View", "Sunnyvale",
+                "San Francisco", "New York", "NYC", "Austin", "Atlanta",
+                "Boston", "Chicago", "Denver", "Los Angeles", "Phoenix",
+                "San Diego", "Washington DC", "DC", "Toronto", "Vancouver",
+                "London", "Dublin", "Paris", "Berlin", "Munich", "Amsterdam",
+                "Stockholm", "Tokyo", "Beijing", "Shanghai", "Singapore",
+                "Sydney", "Melbourne", "Bangalore", "Hyderabad", "Delhi",
+                "Tel Aviv", "Dubai", "Cairo", "Lagos", "Nairobi", "Johannesburg"
+            ]
+            
+            // Clean title and extract location
+            var cleanTitle = msJob.title
+            var extractedLocation: String? = nil
+            
+            // Method 1: Check for location after dash in title
+            if msJob.title.contains(" - ") {
+                let parts = msJob.title.components(separatedBy: " - ")
+                if parts.count > 1 {
+                    let lastPart = parts.last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    // Check if the last part looks like a location
+                    if knownLocations.contains(where: { lastPart.contains($0) }) ||
+                       lastPart.count < 30 { // Likely a location if it's short
+                        cleanTitle = parts.dropLast().joined(separator: " - ")
+                        extractedLocation = lastPart
+                    }
+                }
+            }
+            
+            // Method 2: Check for location in parentheses
+            if extractedLocation == nil && msJob.title.contains("(") && msJob.title.contains(")") {
+                if let range = msJob.title.range(of: #"\(([^)]+)\)"#, options: .regularExpression) {
+                    let location = String(msJob.title[range]).replacingOccurrences(of: "(", with: "").replacingOccurrences(of: ")", with: "")
+                    if knownLocations.contains(where: { location.contains($0) }) {
+                        extractedLocation = location
+                        cleanTitle = msJob.title.replacingOccurrences(of: #"\s*\([^)]+\)"#, with: "", options: .regularExpression)
+                    }
+                }
+            }
+            
+            // Method 3: Look for known locations in the title itself
+            if extractedLocation == nil {
+                for location in knownLocations {
+                    if msJob.title.contains(location) {
+                        extractedLocation = location
+                        break
+                    }
+                }
+            }
+            
+            // Build location string from API fields
             var locationComponents: [String] = []
             
             if let city = msJob.properties?.location?.city, !city.isEmpty {
@@ -500,29 +712,42 @@ actor MicrosoftJobFetcher {
             
             // Check for remote/hybrid in workSiteFlexibility
             let workSiteFlexibility = msJob.properties?.workSiteFlexibility ?? ""
+            let isFullRemote = workSiteFlexibility.lowercased().contains("100%") ||
+                              workSiteFlexibility.lowercased().contains("up to 100%")
             let hasRemoteOption = workSiteFlexibility.lowercased().contains("work from home") ||
-                                 workSiteFlexibility.lowercased().contains("100%") ||
+                                 isFullRemote ||
                                  workSiteFlexibility.lowercased().contains("remote")
-            let hasHybridOption = workSiteFlexibility.lowercased().contains("50%") ||
-                                 workSiteFlexibility.lowercased().contains("hybrid")
+            let hasHybridOption = (workSiteFlexibility.lowercased().contains("up to 50%") ||
+                                  workSiteFlexibility.lowercased().contains("up to 25%") ||
+                                  workSiteFlexibility.lowercased().contains("hybrid")) && !isFullRemote
             
+            // Determine final location string
             var location: String
             if !locationComponents.isEmpty {
                 location = locationComponents.joined(separator: ", ")
-                if hasHybridOption {
-                    location += " (Hybrid)"
-                } else if hasRemoteOption {
-                    location += " (Remote option available)"
-                }
-            } else if hasRemoteOption {
+            } else if let extracted = extractedLocation {
+                location = extracted
+            } else if isFullRemote {
                 location = "Remote"
+            } else if hasHybridOption {
+                location = "Hybrid (Location Flexible)"
+            } else if hasRemoteOption {
+                location = "Remote/Flexible"
             } else {
                 location = "Location not specified"
             }
             
+            if location != "Remote" && location != "Remote/Flexible" && location != "Hybrid (Location Flexible)" {
+                if hasHybridOption {
+                    location += " (Hybrid)"
+                } else if hasRemoteOption && !isFullRemote {
+                    location += " (Remote option)"
+                }
+            }
+            
             return Job(
                 id: "microsoft-\(msJob.jobId)",
-                title: msJob.title,
+                title: cleanTitle,
                 location: location,
                 postingDate: parseDate(msJob.postingDate) ?? Date(),
                 url: "https://careers.microsoft.com/us/en/job/\(msJob.jobId)",
@@ -538,6 +763,7 @@ actor MicrosoftJobFetcher {
         return formatter.date(from: dateString)
     }
 }
+
 
 // MARK: - API Response Models
 struct MSResponse: Codable {
@@ -792,8 +1018,8 @@ struct JobRow: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     
-                    if !job.cleanDescription.isEmpty {
-                        Text(job.cleanDescription)
+                    if !job.overview.isEmpty {
+                        Text(job.overview)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .lineLimit(2)
@@ -821,6 +1047,7 @@ struct JobRow: View {
 struct JobDetailView: View {
     let job: Job
     @EnvironmentObject var jobManager: JobManager
+    @State private var selectedSection = "overview"
     
     var body: some View {
         ScrollView {
@@ -882,17 +1109,61 @@ struct JobDetailView: View {
                     
                     Divider()
                     
-                    // Description
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Job Description")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                        
-                        Text(job.cleanDescription)
-                            .font(.body)
-                            .lineSpacing(4)
-                            .fixedSize(horizontal: false, vertical: true)
+                    // Section Picker
+                    Picker("Section", selection: $selectedSection) {
+                        Text("Overview").tag("overview")
+                        if job.requiredQualifications != nil {
+                            Text("Required").tag("required")
+                        }
+                        if job.preferredQualifications != nil {
+                            Text("Preferred").tag("preferred")
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    
+                    // Content based on selection
+                    VStack(alignment: .leading, spacing: 12) {
+                        switch selectedSection {
+                        case "overview":
+                            Text("Job Description")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            
+                            Text(job.overview)
+                                .font(.body)
+                                .lineSpacing(6)
+                                .fixedSize(horizontal: false, vertical: true)
+                            
+                        case "required":
+                            Text("Required/Minimum Qualifications")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            
+                            if let qualifications = job.requiredQualifications {
+                                Text(qualifications)
+                                    .font(.body)
+                                    .lineSpacing(6)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            
+                        case "preferred":
+                            Text("Preferred Qualifications")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            
+                            if let qualifications = job.preferredQualifications {
+                                Text(qualifications)
+                                    .font(.body)
+                                    .lineSpacing(6)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            
+                        default:
+                            EmptyView()
+                        }
+                    }
+                    .padding(.horizontal)
                     
                     Spacer(minLength: 40)
                     
