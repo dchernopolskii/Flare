@@ -66,8 +66,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "briefcase.fill", accessibilityDescription: "Job Monitor")
+            let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+            button.image = NSImage(systemSymbolName: "briefcase.fill", accessibilityDescription: "Job Monitor")?
+                .withSymbolConfiguration(config)
             button.action = #selector(togglePopover)
+            button.toolTip = "Microsoft Job Monitor"
         }
     }
     
@@ -618,25 +621,12 @@ actor MicrosoftJobFetcher {
     }
     
     private func parseResponse(_ data: Data, page: Int = 1) throws -> [Job] {
-        // Only log for first page
-        if page == 1 {
-            if let jsonString = String(data: data, encoding: .utf8) {
-                print("=== MICROSOFT API RESPONSE (first 2000 chars) ===")
-                let truncated = String(jsonString.prefix(2000))
-                print(truncated)
-                print("=== END RESPONSE SAMPLE ===")
-            }
-        }
-        
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         
         let response = try decoder.decode(MSResponse.self, from: data)
         
         if page == 1 {
-            print("\nTotal jobs available: \(response.operationResult.result.totalJobs ?? 0)")
-            print("Jobs in this page: \(response.operationResult.result.jobs.count)")
-            
             // Update total available jobs
             if let total = response.operationResult.result.totalJobs {
                 Task { @MainActor in
@@ -667,9 +657,7 @@ actor MicrosoftJobFetcher {
                 let parts = msJob.title.components(separatedBy: " - ")
                 if parts.count > 1 {
                     let lastPart = parts.last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    // Check if the last part looks like a location
-                    if knownLocations.contains(where: { lastPart.contains($0) }) ||
-                       lastPart.count < 30 { // Likely a location if it's short
+                    if knownLocations.contains(where: { lastPart.contains($0) }) || lastPart.count < 30 {
                         cleanTitle = parts.dropLast().joined(separator: " - ")
                         extractedLocation = lastPart
                     }
@@ -677,13 +665,16 @@ actor MicrosoftJobFetcher {
             }
             
             // Method 2: Check for location in parentheses
-            if extractedLocation == nil && msJob.title.contains("(") && msJob.title.contains(")") {
-                if let range = msJob.title.range(of: #"\(([^)]+)\)"#, options: .regularExpression) {
-                    let location = String(msJob.title[range]).replacingOccurrences(of: "(", with: "").replacingOccurrences(of: ")", with: "")
-                    if knownLocations.contains(where: { location.contains($0) }) {
-                        extractedLocation = location
-                        cleanTitle = msJob.title.replacingOccurrences(of: #"\s*\([^)]+\)"#, with: "", options: .regularExpression)
-                    }
+            if extractedLocation == nil,
+               let range = msJob.title.range(of: #"\(([^)]+)\)"#, options: .regularExpression) {
+                let location = String(msJob.title[range])
+                    .replacingOccurrences(of: "(", with: "")
+                    .replacingOccurrences(of: ")", with: "")
+                if knownLocations.contains(where: { location.contains($0) }) {
+                    extractedLocation = location
+                    cleanTitle = msJob.title.replacingOccurrences(of: #"\s*\([^)]+\)"#,
+                                                                  with: "",
+                                                                  options: .regularExpression)
                 }
             }
             
@@ -697,51 +688,31 @@ actor MicrosoftJobFetcher {
                 }
             }
             
-            // Build location string from API fields
-            var locationComponents: [String] = []
+            // Build location string from Properties
+            var location: String = "Location not specified"
             
-            if let city = msJob.properties?.location?.city, !city.isEmpty {
-                locationComponents.append(city)
-            }
-            if let state = msJob.properties?.location?.state, !state.isEmpty {
-                locationComponents.append(state)
-            }
-            if let country = msJob.properties?.location?.country, !country.isEmpty {
-                locationComponents.append(country)
-            }
-            
-            // Check for remote/hybrid in workSiteFlexibility
-            let workSiteFlexibility = msJob.properties?.workSiteFlexibility ?? ""
-            let isFullRemote = workSiteFlexibility.lowercased().contains("100%") ||
-                              workSiteFlexibility.lowercased().contains("up to 100%")
-            let hasRemoteOption = workSiteFlexibility.lowercased().contains("work from home") ||
-                                 isFullRemote ||
-                                 workSiteFlexibility.lowercased().contains("remote")
-            let hasHybridOption = (workSiteFlexibility.lowercased().contains("up to 50%") ||
-                                  workSiteFlexibility.lowercased().contains("up to 25%") ||
-                                  workSiteFlexibility.lowercased().contains("hybrid")) && !isFullRemote
-            
-            // Determine final location string
-            var location: String
-            if !locationComponents.isEmpty {
-                location = locationComponents.joined(separator: ", ")
+            if let primaryLoc = msJob.properties?.primaryLocation, !primaryLoc.isEmpty {
+                location = primaryLoc
+            } else if let locations = msJob.properties?.locations, !locations.isEmpty {
+                location = locations[0]
             } else if let extracted = extractedLocation {
                 location = extracted
-            } else if isFullRemote {
-                location = "Remote"
-            } else if hasHybridOption {
-                location = "Hybrid (Location Flexible)"
-            } else if hasRemoteOption {
-                location = "Remote/Flexible"
-            } else {
-                location = "Location not specified"
             }
             
-            if location != "Remote" && location != "Remote/Flexible" && location != "Hybrid (Location Flexible)" {
-                if hasHybridOption {
-                    location += " (Hybrid)"
-                } else if hasRemoteOption && !isFullRemote {
-                    location += " (Remote option)"
+            // Check for remote/hybrid indicators
+            let workSiteFlexibility = msJob.properties?.workSiteFlexibility ?? ""
+            let isHybrid = workSiteFlexibility.contains("days / week") ||
+                           workSiteFlexibility.contains("days/week") ||
+                           workSiteFlexibility.lowercased().contains("hybrid")
+            let isRemote = workSiteFlexibility.lowercased().contains("100%") ||
+                           workSiteFlexibility.lowercased().contains("remote") ||
+                           workSiteFlexibility.lowercased().contains("work from home")
+            
+            if location != "Location not specified" {
+                if isHybrid {
+                    location += " (Hybrid: \(workSiteFlexibility))"
+                } else if isRemote {
+                    location += " (Remote)"
                 }
             }
             
@@ -788,14 +759,13 @@ struct MSJob: Codable {
 
 struct Properties: Codable {
     let description: String?
-    let location: Location?
+    let locations: [String]?
+    let primaryLocation: String?
     let workSiteFlexibility: String?
-}
-
-struct Location: Codable {
-    let city: String?
-    let state: String?
-    let country: String?
+    let profession: String?
+    let discipline: String?
+    let roleType: String?
+    let employmentType: String?
 }
 
 enum FetchError: LocalizedError {

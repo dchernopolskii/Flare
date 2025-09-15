@@ -49,12 +49,13 @@
       "size" : "256x256"
     },
     {
-      "filename" : "MS.png",
+      "filename" : "Microsoft_logo.svg 1.png",
       "idiom" : "mac",
       "scale" : "1x",
       "size" : "512x512"
     },
     {
+      "filename" : "Microsoft_logo.svg.png",
       "idiom" : "mac",
       "scale" : "2x",
       "size" : "512x512"
