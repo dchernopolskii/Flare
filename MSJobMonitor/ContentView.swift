@@ -149,13 +149,11 @@ struct Job: Identifiable, Codable, Equatable {
             .replacingOccurrences(of: "&quot;", with: "\"")
             .replacingOccurrences(of: "&#39;", with: "'")
             .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&#8217;", with: "'")
-            .replacingOccurrences(of: "&#8220;", with: """
-            )
-            .replacingOccurrences(of: "&#8221;", with:
-            """)
-            .replacingOccurrences(of: "&#8211;", with: "–")
-            .replacingOccurrences(of: "&#8212;", with: "—")
+            .replacingOccurrences(of: "&#8217;", with: "\u{2019}")
+            .replacingOccurrences(of: "&#8220;", with: "\u{201C}")
+            .replacingOccurrences(of: "&#8221;", with: "\u{201D}")
+            .replacingOccurrences(of: "&#8211;", with: "\u{2013}")
+            .replacingOccurrences(of: "&#8212;", with: "\u{2014}")
         
         let lines = text.components(separatedBy: .newlines)
         let cleanedLines = lines.map { line in
@@ -782,81 +780,187 @@ enum FetchError: LocalizedError {
 // MARK: - Views
 struct ContentView: View {
     @EnvironmentObject var jobManager: JobManager
+    @State private var sidebarVisible = true
+    @State private var windowSize: CGSize = .zero
+    
+    private var isWindowMinimized: Bool {
+        windowSize.width < 800
+    }
     
     var body: some View {
-        NavigationSplitView {
-            // Sidebar
-            VStack(spacing: 20) {
-                Image(systemName: "briefcase.fill")
-                    .font(.system(size: 40))
-                    .foregroundColor(.accentColor)
-                
-                VStack(spacing: 10) {
-                    SidebarButton(
-                        title: "Jobs",
-                        icon: "list.bullet",
-                        isSelected: jobManager.selectedTab == "jobs"
-                    ) {
-                        jobManager.selectedTab = "jobs"
-                        jobManager.selectedJob = nil
-                    }
-                    
-                    SidebarButton(
-                        title: "Settings",
-                        icon: "gear",
-                        isSelected: jobManager.selectedTab == "settings"
-                    ) {
-                        jobManager.selectedTab = "settings"
-                        jobManager.selectedJob = nil
-                    }
-                }
-                
-                Spacer()
-                
-                if jobManager.isLoading {
-                    VStack(spacing: 4) {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        if !jobManager.loadingProgress.isEmpty {
-                            Text(jobManager.loadingProgress)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                // Collapsible Sidebar
+                if sidebarVisible {
+                    VStack(spacing: 20) {
+                        // Sidebar header with toggle
+                        HStack {
+                            Image(systemName: "briefcase.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.accentColor)
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    sidebarVisible = false
+                                }
+                            }) {
+                                Image(systemName: "sidebar.left")
+                                    .font(.title3)
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Hide Sidebar")
+                        }
+                        
+                        VStack(spacing: 10) {
+                            SidebarButton(
+                                title: "Jobs",
+                                icon: "list.bullet",
+                                isSelected: jobManager.selectedTab == "jobs"
+                            ) {
+                                jobManager.selectedTab = "jobs"
+                                // Auto-hide sidebar when minimized and job is selected
+                                if isWindowMinimized {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        sidebarVisible = false
+                                    }
+                                }
+                            }
+                            
+                            SidebarButton(
+                                title: "Settings",
+                                icon: "gear",
+                                isSelected: jobManager.selectedTab == "settings"
+                            ) {
+                                jobManager.selectedTab = "settings"
+                                jobManager.selectedJob = nil
+                                // Auto-hide sidebar when minimized and settings is selected
+                                if isWindowMinimized {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        sidebarVisible = false
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        if jobManager.isLoading {
+                            VStack(spacing: 4) {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                if !jobManager.loadingProgress.isEmpty {
+                                    Text(jobManager.loadingProgress)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                }
+                            }
+                        }
+                        
+                        VStack(spacing: 4) {
+                            Text("\(jobManager.jobs.count) jobs (24h)")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            if jobManager.totalFetchedCount > jobManager.filteredCount {
+                                Text("(\(jobManager.totalFetchedCount) fetched)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            if jobManager.totalAvailableJobs > 0 {
+                                Text("\(jobManager.totalAvailableJobs) available")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
+                    .padding()
+                    .frame(width: 200)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .overlay(
+                        Rectangle()
+                            .frame(width: 1)
+                            .foregroundColor(Color(NSColor.separatorColor)),
+                        alignment: .trailing
+                    )
+                    .transition(.move(edge: .leading))
                 }
                 
-                VStack(spacing: 4) {
-                    Text("\(jobManager.jobs.count) jobs (24h)")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    if jobManager.totalFetchedCount > jobManager.filteredCount {
-                        Text("(\(jobManager.totalFetchedCount) fetched)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                // Main content area
+                HStack(spacing: 0) {
+                    // Show toggle when sidebar is hidden
+                    if !sidebarVisible {
+                        VStack {
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    sidebarVisible = true
+                                }
+                            }) {
+                                Image(systemName: "sidebar.left")
+                                    .font(.title2)
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .help("Show Sidebar")
+                            
+                            Spacer()
+                        }
+                        .padding(.top, 8)
+                        .padding(.leading, 8)
                     }
-                    if jobManager.totalAvailableJobs > 0 {
-                        Text("\(jobManager.totalAvailableJobs) available")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                    
+                    // Content
+                    VStack(spacing: 0) {
+                        if jobManager.selectedTab == "jobs" {
+                            JobListView(
+                                sidebarVisible: $sidebarVisible,
+                                isWindowMinimized: isWindowMinimized
+                            )
+                        } else {
+                            SettingsView()
+                        }
                     }
+                    
+                    // Sliding detail pane
+                    if let selectedJob = jobManager.selectedJob {
+                        JobDetailPane(job: selectedJob)
+                            .frame(width: min(450, geometry.size.width * 0.5))
+                            .transition(.move(edge: .trailing))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.3), value: jobManager.selectedJob)
+            }
+            .animation(.easeInOut(duration: 0.3), value: sidebarVisible)
+            .onAppear {
+                windowSize = geometry.size
+                // Hide sidebar by default if window starts minimized
+                if isWindowMinimized {
+                    sidebarVisible = false
                 }
             }
-            .padding()
-            .frame(width: 200)
-        } detail: {
-            // Main content
-            if jobManager.selectedTab == "jobs" {
-                if let selectedJob = jobManager.selectedJob {
-                    JobDetailView(job: selectedJob)
-                } else {
-                    JobListView()
+            .onChange(of: geometry.size) { newSize in
+                let wasMinimized = isWindowMinimized
+                windowSize = newSize
+                
+                // Auto-hide sidebar when window becomes minimized
+                if !wasMinimized && isWindowMinimized && sidebarVisible {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        sidebarVisible = false
+                    }
                 }
-            } else {
-                SettingsView()
+                // Auto-show sidebar when window becomes normal size
+                else if wasMinimized && !isWindowMinimized && !sidebarVisible {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        sidebarVisible = true
+                    }
+                }
             }
         }
-        .frame(minWidth: 900, minHeight: 600)
-        .navigationTitle("Microsoft Job Monitor")
+        .frame(minWidth: 400, minHeight: 400)
     }
 }
 
@@ -885,6 +989,8 @@ struct SidebarButton: View {
 
 struct JobListView: View {
     @EnvironmentObject var jobManager: JobManager
+    @Binding var sidebarVisible: Bool
+    let isWindowMinimized: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -936,7 +1042,11 @@ struct JobListView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(jobManager.jobs) { job in
-                            JobRow(job: job)
+                            JobRow(
+                                job: job,
+                                sidebarVisible: $sidebarVisible,
+                                isWindowMinimized: isWindowMinimized
+                            )
                             Divider()
                         }
                     }
@@ -963,10 +1073,26 @@ struct JobRow: View {
     let job: Job
     @State private var isHovered = false
     @EnvironmentObject var jobManager: JobManager
+    @Binding var sidebarVisible: Bool
+    let isWindowMinimized: Bool
+    
+    private var isSelected: Bool {
+        jobManager.selectedJob?.id == job.id
+    }
     
     var body: some View {
         Button(action: {
-            jobManager.selectedJob = job
+            if isSelected {
+                jobManager.selectedJob = nil
+            } else {
+                jobManager.selectedJob = job
+                // Auto-hide sidebar when minimized and job is selected
+                if isWindowMinimized && sidebarVisible {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        sidebarVisible = false
+                    }
+                }
+            }
         }) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "briefcase")
@@ -999,12 +1125,22 @@ struct JobRow: View {
                 
                 Spacer()
                 
-                Image(systemName: "chevron.right")
+                Image(systemName: isSelected ? "chevron.down" : "chevron.right")
                     .foregroundColor(.secondary)
-                    .opacity(isHovered ? 1 : 0.5)
+                    .opacity(isHovered || isSelected ? 1 : 0.5)
             }
             .padding()
-            .background(isHovered ? Color.gray.opacity(0.1) : Color.clear)
+            .background(
+                Group {
+                    if isSelected {
+                        Color.accentColor.opacity(0.1)
+                    } else if isHovered {
+                        Color.gray.opacity(0.05)
+                    } else {
+                        Color.clear
+                    }
+                }
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1014,148 +1150,126 @@ struct JobRow: View {
     }
 }
 
-struct JobDetailView: View {
+struct JobDetailPane: View {
     let job: Job
     @EnvironmentObject var jobManager: JobManager
-    @State private var selectedSection = "overview"
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Header with back button
-                HStack {
-                    Button(action: {
-                        jobManager.selectedJob = nil
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                            Text("Back to Jobs")
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        jobManager.openJob(job)
-                    }) {
-                        Label("Open in Browser", systemImage: "arrow.up.right.square")
-                    }
-                    .buttonStyle(.borderedProminent)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Text("Job Details")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                Button(action: {
+                    jobManager.selectedJob = nil
+                }) {
+                    Image(systemName: "xmark")
+                        .foregroundColor(.secondary)
                 }
-                .padding()
-                
-                Divider()
-                
-                // Job details
-                VStack(alignment: .leading, spacing: 16) {
-                    // Title
-                    Text(job.title)
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                    
-                    // Location and time
-                    HStack(spacing: 20) {
-                        Label(job.location, systemImage: "location")
-                            .font(.title3)
+                .buttonStyle(.plain)
+            }
+            .padding()
+            
+            Divider()
+            
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Job header
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(job.title)
+                            .font(.title2)
+                            .fontWeight(.bold)
                         
-                        Label {
-                            Text(job.postingDate, style: .relative)
-                        } icon: {
-                            Image(systemName: "clock")
-                        }
-                        .font(.title3)
-                    }
-                    .foregroundColor(.secondary)
-                    
-                    if let flexibility = job.workSiteFlexibility, !flexibility.isEmpty {
-                        Label(flexibility, systemImage: "house.laptop")
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(job.location, systemImage: "location")
+                                .font(.callout)
+                            
+                            Label {
+                                Text(job.postingDate, style: .relative)
+                            } icon: {
+                                Image(systemName: "clock")
+                            }
                             .font(.callout)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(8)
+                        }
+                        .foregroundColor(.secondary)
+                        
+                        if let flexibility = job.workSiteFlexibility, !flexibility.isEmpty {
+                            Label(flexibility, systemImage: "house.laptop")
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.1))
+                                .cornerRadius(6)
+                        }
                     }
                     
                     Divider()
                     
-                    // Section Picker
-                    Picker("Section", selection: $selectedSection) {
-                        Text("Overview").tag("overview")
-                        if job.requiredQualifications != nil {
-                            Text("Required").tag("required")
-                        }
-                        if job.preferredQualifications != nil {
-                            Text("Preferred").tag("preferred")
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-                    
-                    // Content based on selection
+                    // Job description
                     VStack(alignment: .leading, spacing: 12) {
-                        switch selectedSection {
-                        case "overview":
-                            Text("Job Description")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            
-                            Text(job.overview)
-                                .font(.body)
-                                .lineSpacing(6)
-                                .fixedSize(horizontal: false, vertical: true)
-                            
-                        case "required":
-                            Text("Required/Minimum Qualifications")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            
-                            if let qualifications = job.requiredQualifications {
-                                Text(qualifications)
+                        Text(job.overview)
+                            .font(.body)
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                        
+                        // Required qualifications if available
+                        if let required = job.requiredQualifications {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Required Qualifications")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                                
+                                Text(required)
                                     .font(.body)
-                                    .lineSpacing(6)
+                                    .lineSpacing(4)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            
-                        case "preferred":
-                            Text("Preferred Qualifications")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            
-                            if let qualifications = job.preferredQualifications {
-                                Text(qualifications)
+                        }
+                        
+                        // Preferred qualifications if available
+                        if let preferred = job.preferredQualifications {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Preferred Qualifications")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                                
+                                Text(preferred)
                                     .font(.body)
-                                    .lineSpacing(6)
+                                    .lineSpacing(4)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            
-                        default:
-                            EmptyView()
                         }
                     }
-                    .padding(.horizontal)
                     
-                    Spacer(minLength: 40)
+                    Spacer(minLength: 20)
                     
-                    // Action button
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            jobManager.openJob(job)
-                        }) {
-                            Text("Apply on Microsoft Careers")
-                                .font(.headline)
-                                .padding(.horizontal, 30)
-                                .padding(.vertical, 12)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        Spacer()
+                    // Apply button
+                    Button(action: {
+                        jobManager.openJob(job)
+                    }) {
+                        Text("Apply on Microsoft Careers")
+                            .font(.callout)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
                 .padding()
             }
         }
+        .background(Color(NSColor.controlBackgroundColor))
+        .overlay(
+            Rectangle()
+                .frame(width: 1)
+                .foregroundColor(Color(NSColor.separatorColor)),
+            alignment: .leading
+        )
     }
 }
 
