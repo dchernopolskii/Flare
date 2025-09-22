@@ -341,9 +341,14 @@ class JobManager: ObservableObject {
         
         do {
             let fetcher = MicrosoftJobFetcher()
+            
+            // Parse comma-separated filters before passing to fetcher
+            let titleKeywords = jobTitleFilter.isEmpty ? [] :
+                jobTitleFilter.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            
             let fetchedJobs = try await fetcher.fetchJobs(
-                titleKeywords: jobTitleFilter.isEmpty ? [] : [jobTitleFilter],
-                location: locationFilter,
+                titleKeywords: titleKeywords,
+                location: locationFilter, // This will be parsed inside fetchJobs
                 maxPages: Int(maxPagesToFetch)
             )
             
@@ -516,41 +521,166 @@ class JobManager: ObservableObject {
 }
 
 // MARK: - Job Fetcher
+struct SearchQuery: Hashable {
+    let title: String
+    let location: String
+    let description: String
+}
+
 actor MicrosoftJobFetcher {
     private let baseURL = "https://gcsservices.careers.microsoft.com/search/api/v1/search"
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int = 5) async throws -> [Job] {
+        print("MULTI-QUERY: Starting with titles: \(titleKeywords), location: '\(location)'")
+        
+        var allJobs: [Job] = []
+        var globalSeenJobIds = Set<String>()
+        
+        // Parse comma-separated locations
+        let locations = location.isEmpty ? [""] : location.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+        
+        let titles = titleKeywords.filter { !$0.isEmpty }
+        
+        print("MULTI-QUERY: Parsed titles: \(titles)")
+        print("MULTI-QUERY: Parsed locations: \(locations)")
+        
+        // Generate individual search combinations
+        var searchCombinations: [(title: String, location: String)] = []
+        
+        if titles.isEmpty && locations.isEmpty {
+            searchCombinations.append(("", ""))
+        } else if titles.isEmpty {
+            for loc in locations {
+                searchCombinations.append(("", loc))
+            }
+        } else if locations.isEmpty {
+            for title in titles {
+                searchCombinations.append((title, ""))
+            }
+        } else {
+            for title in titles {
+                for loc in locations {
+                    searchCombinations.append((title, loc))
+                }
+            }
+        }
+        
+        print("MULTI-QUERY: Will make \(searchCombinations.count) separate API calls:")
+        for (i, combo) in searchCombinations.enumerated() {
+            let query = [combo.title, combo.location].filter { !$0.isEmpty }.joined(separator: " ")
+            print("  \(i+1). Query: '\(query.isEmpty ? "recent jobs" : query)'")
+        }
+        
+        for (index, combo) in searchCombinations.enumerated() {
+            let description = [combo.title, combo.location].filter { !$0.isEmpty }.joined(separator: " in ")
+            
+            await MainActor.run {
+                JobManager.shared.loadingProgress = "Search \(index + 1)/\(searchCombinations.count): \(description.isEmpty ? "recent jobs" : description)"
+            }
+            
+            let jobs = try await executeIndividualSearch(title: combo.title, location: combo.location, maxPages: max(1, maxPages / searchCombinations.count))
+            
+            // Deduplicate across all searches
+            let newJobs = jobs.filter { job in
+                if globalSeenJobIds.contains(job.id) {
+                    return false
+                }
+                globalSeenJobIds.insert(job.id)
+                return true
+            }
+            
+            allJobs.append(contentsOf: newJobs)
+            print("MULTI-QUERY: Search \(index + 1) returned \(newJobs.count) new unique jobs")
+            
+            try await Task.sleep(nanoseconds: 700_000_000) // 0.7 seconds
+        }
+        
+        await MainActor.run {
+            JobManager.shared.loadingProgress = ""
+        }
+        
+        print("MULTI-QUERY: TOTAL RESULT: \(allJobs.count) unique jobs from \(searchCombinations.count) searches")
+        return allJobs
+    }
+
+    
+    
+    private func generateSearchQueries(parsedTitles: [String], parsedLocations: [String]) -> [SearchQuery] {
+        var queries: [SearchQuery] = []
+        
+        if parsedTitles.isEmpty && parsedLocations.isEmpty {
+            queries.append(SearchQuery(title: "", location: "", description: "Recent jobs"))
+            return queries
+        }
+        
+        if parsedTitles.isEmpty {
+            for location in parsedLocations {
+                queries.append(SearchQuery(title: "", location: location, description: "All jobs in \(location)"))
+                
+                let synonyms = getLocationSynonyms(for: location)
+                for synonym in synonyms.prefix(1) {
+                    queries.append(SearchQuery(title: "", location: synonym, description: "All jobs in \(synonym)"))
+                }
+            }
+        } else if parsedLocations.isEmpty {
+            for title in parsedTitles {
+                queries.append(SearchQuery(title: title, location: "", description: "\(title) roles"))
+                
+                let synonyms = getTitleSynonyms(for: title)
+                for synonym in synonyms.prefix(1) {
+                    queries.append(SearchQuery(title: synonym, location: "", description: "\(synonym) roles"))
+                }
+            }
+        } else {
+            // Combine titles and locations
+            for title in parsedTitles {
+                for location in parsedLocations {
+                    queries.append(SearchQuery(title: title, location: location, description: "\(title) in \(location)"))
+                }
+            }
+
+//            // broader searches with just titles
+//            for title in parsedTitles {
+//                queries.append(SearchQuery(title: title, location: "", description: "\(title) (any location)"))
+//            }
+        }
+        
+        return Array(queries.prefix(8))
+    }
+    
+    private func performSingleSearch(title: String, location: String, maxPages: Int) async throws -> [Job] {
         var allJobs: [Job] = []
         var seenJobIds = Set<String>()
         var currentPage = 1
-        let pageLimit = min(maxPages, 20) // Cap at 20 pages
+        let pageLimit = min(maxPages, 5) // Reduced page limit per individual search
         
         while currentPage <= pageLimit {
-            // Update progress on main thread
-            await MainActor.run {
-                JobManager.shared.loadingProgress = "Fetching page \(currentPage) of \(pageLimit)..."
-            }
-            
             var components = URLComponents(string: baseURL)!
             
-            var queryValue = titleKeywords.joined(separator: " ")
-            if !location.isEmpty {
-                queryValue += " \(location)"
+            var queryParts: [String] = []
+            if !title.isEmpty {
+                queryParts.append(title)
             }
+            if !location.isEmpty {
+                queryParts.append(location)
+            }
+            let queryString = queryParts.joined(separator: " ")
             
             components.queryItems = [
                 URLQueryItem(name: "l", value: "en_us"),
                 URLQueryItem(name: "pg", value: String(currentPage)),
                 URLQueryItem(name: "pgSz", value: "20"),
-                URLQueryItem(name: "o", value: "Relevance"),
+                URLQueryItem(name: "o", value: "Recent"),
                 URLQueryItem(name: "flt", value: "true")
             ]
             
-            if !queryValue.isEmpty {
-                components.queryItems?.append(URLQueryItem(name: "q", value: queryValue))
+            if !queryString.isEmpty {
+                components.queryItems?.append(URLQueryItem(name: "q", value: queryString))
             }
             
-            print("Fetching URL: \(components.url?.absoluteString ?? "nil")")
+            print("🌐 API Query: \(queryString.isEmpty ? "Recent jobs" : queryString)")
             
             var request = URLRequest(url: components.url!)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -559,45 +689,22 @@ actor MicrosoftJobFetcher {
             
             let (data, response) = try await URLSession.shared.data(for: request)
             
-            guard let httpResponse = response as? HTTPURLResponse else {
-                print("Response is not HTTP response")
-                throw FetchError.invalidResponse
-            }
-            
-            if httpResponse.statusCode != 200 {
-                print("HTTP Error: Status code \(httpResponse.statusCode)")
-                if let errorString = String(data: data, encoding: .utf8) {
-                    print("Error response: \(errorString.prefix(500))")
-                }
-                throw FetchError.invalidResponse
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                print("❌ API error for query: \(queryString)")
+                break
             }
             
             let pageJobs = try parseResponse(data, page: currentPage)
             
-            // Deduplicate jobs
             let uniquePageJobs = pageJobs.filter { job in
                 if seenJobIds.contains(job.id) {
-                    print("Skipping duplicate job: \(job.id) - \(job.title)")
                     return false
                 }
                 seenJobIds.insert(job.id)
                 return true
             }
             
-            let recentJobsInPage = uniquePageJobs.filter { job in
-                let hoursSincePosting = Date().timeIntervalSince(job.postingDate) / 3600
-                return hoursSincePosting <= 24 && hoursSincePosting >= 0
-            }
-            
             allJobs.append(contentsOf: uniquePageJobs)
-            
-            if recentJobsInPage.isEmpty && allJobs.contains(where: { job in
-                let hours = Date().timeIntervalSince(job.postingDate) / 3600
-                return hours <= 24 && hours >= 0
-            }) {
-                print("No recent jobs in page \(currentPage), stopping pagination")
-                break
-            }
             
             if pageJobs.count < 20 {
                 break
@@ -605,17 +712,53 @@ actor MicrosoftJobFetcher {
             
             currentPage += 1
             
-            // Small delay to be nice to the API
-            try await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
         }
         
-        await MainActor.run {
-            JobManager.shared.loadingProgress = ""
-        }
-        
-        let pagesFetched = min(currentPage, pageLimit)
-        print("Total unique jobs fetched across \(pagesFetched) page(s): \(allJobs.count)")
         return allJobs
+    }
+    
+    private func getTitleSynonyms(for title: String) -> [String] {
+        let lowercaseTitle = title.lowercased()
+        let synonymMap: [String: [String]] = [
+            "manager": ["director", "lead", "supervisor"],
+            "engineer": ["developer", "architect", "specialist"],
+            "product": ["program", "project"],
+            "software": ["dev", "engineering"],
+            "senior": ["principal", "staff", "sr"],
+            "program": ["product", "project"],
+            "developer": ["engineer", "dev"],
+            "data": ["analytics", "bi", "intelligence"],
+            "marketing": ["growth", "demand", "digital"],
+            "sales": ["account", "business development", "revenue"]
+        ]
+        
+        for (key, synonyms) in synonymMap {
+            if lowercaseTitle.contains(key) {
+                return synonyms
+            }
+        }
+        return []
+    }
+    
+    private func getLocationSynonyms(for location: String) -> [String] {
+        let lowercaseLocation = location.lowercased()
+        let locationMap: [String: [String]] = [
+            "washington": ["redmond", "seattle", "bellevue"],
+            "seattle": ["redmond", "bellevue", "kirkland"],
+            "california": ["mountain view", "san francisco", "los angeles"],
+            "texas": ["austin", "dallas", "houston"],
+            "new york": ["nyc", "manhattan"],
+            "boston": ["cambridge", "ma"],
+            "chicago": ["il", "illinois"]
+        ]
+        
+        for (key, synonyms) in locationMap {
+            if lowercaseLocation.contains(key) {
+                return synonyms.prefix(2).map { String($0) }
+            }
+        }
+        return []
     }
     
     private func parseResponse(_ data: Data, page: Int = 1) throws -> [Job] {
@@ -634,7 +777,6 @@ actor MicrosoftJobFetcher {
         }
         
         return response.operationResult.result.jobs.map { msJob in
-            // Common Microsoft office locations for better detection
             let knownLocations = [
                 "Redmond", "Seattle", "Bellevue", "Mountain View", "Sunnyvale",
                 "San Francisco", "New York", "NYC", "Austin", "Atlanta",
@@ -646,7 +788,6 @@ actor MicrosoftJobFetcher {
                 "Tel Aviv", "Dubai", "Cairo", "Lagos", "Nairobi", "Johannesburg"
             ]
             
-            // Clean title and extract location
             var cleanTitle = msJob.title
             var extractedLocation: String? = nil
             
@@ -662,7 +803,7 @@ actor MicrosoftJobFetcher {
                 }
             }
             
-            // Method 2: Check for location in parentheses
+            // Check for location in parentheses
             if extractedLocation == nil,
                let range = msJob.title.range(of: #"\(([^)]+)\)"#, options: .regularExpression) {
                 let location = String(msJob.title[range])
@@ -676,7 +817,7 @@ actor MicrosoftJobFetcher {
                 }
             }
             
-            // Method 3: Look for known locations in the title itself
+            // Look for known locations in the title itself
             if extractedLocation == nil {
                 for location in knownLocations {
                     if msJob.title.contains(location) {
@@ -686,7 +827,6 @@ actor MicrosoftJobFetcher {
                 }
             }
             
-            // Build location string from Properties
             var location: String = "Location not specified"
             
             if let primaryLoc = msJob.properties?.primaryLocation, !primaryLoc.isEmpty {
@@ -697,7 +837,7 @@ actor MicrosoftJobFetcher {
                 location = extracted
             }
             
-            // Check for remote/hybrid indicators
+            // Check for remote/hybrid
             let workSiteFlexibility = msJob.properties?.workSiteFlexibility ?? ""
             let isHybrid = workSiteFlexibility.contains("days / week") ||
                            workSiteFlexibility.contains("days/week") ||
@@ -731,7 +871,57 @@ actor MicrosoftJobFetcher {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: dateString)
     }
+    
+    private func executeIndividualSearch(title: String, location: String, maxPages: Int) async throws -> [Job] {
+        var jobs: [Job] = []
+        let pageLimit = min(maxPages, 3)
+        
+        for page in 1...pageLimit {
+            let queryParts = [title, location].filter { !$0.isEmpty }
+            let queryString = queryParts.joined(separator: " ")
+            
+            var components = URLComponents(string: baseURL)!
+            components.queryItems = [
+                URLQueryItem(name: "l", value: "en_us"),
+                URLQueryItem(name: "pg", value: String(page)),
+                URLQueryItem(name: "pgSz", value: "20"),
+                URLQueryItem(name: "o", value: "Recent"),
+                URLQueryItem(name: "flt", value: "true")
+            ]
+            
+            if !queryString.isEmpty {
+                components.queryItems?.append(URLQueryItem(name: "q", value: queryString))
+            }
+            
+            print("MULTI-QUERY: API call with query: '\(queryString)' (page \(page))")
+            print("MULTI-QUERY: URL: \(components.url?.absoluteString ?? "nil")")
+            
+            var request = URLRequest(url: components.url!)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+            request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                print("MULTI-QUERY: API error for query: '\(queryString)'")
+                break
+            }
+            
+            let pageJobs = try parseResponse(data, page: page)
+            jobs.append(contentsOf: pageJobs)
+            
+            if pageJobs.count < 20 {
+                break
+            }
+            
+            try await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+        }
+        
+        return jobs
+    }
 }
+
 
 
 // MARK: - API Response Models
@@ -821,7 +1011,6 @@ struct ContentView: View {
                                 isSelected: jobManager.selectedTab == "jobs"
                             ) {
                                 jobManager.selectedTab = "jobs"
-                                // Auto-hide sidebar when minimized and job is selected
                                 if isWindowMinimized {
                                     withAnimation(.easeInOut(duration: 0.3)) {
                                         sidebarVisible = false
@@ -836,7 +1025,6 @@ struct ContentView: View {
                             ) {
                                 jobManager.selectedTab = "settings"
                                 jobManager.selectedJob = nil
-                                // Auto-hide sidebar when minimized and settings is selected
                                 if isWindowMinimized {
                                     withAnimation(.easeInOut(duration: 0.3)) {
                                         sidebarVisible = false
@@ -888,7 +1076,6 @@ struct ContentView: View {
                     .transition(.move(edge: .leading))
                 }
                 
-                // Main content area
                 HStack(spacing: 0) {
                     // Show toggle when sidebar is hidden
                     if !sidebarVisible {
@@ -925,7 +1112,6 @@ struct ContentView: View {
                         }
                     }
                     
-                    // Sliding detail pane
                     if let selectedJob = jobManager.selectedJob {
                         JobDetailPane(job: selectedJob)
                             .frame(width: min(450, geometry.size.width * 0.5))
@@ -946,13 +1132,11 @@ struct ContentView: View {
                 let wasMinimized = isWindowMinimized
                 windowSize = newSize
                 
-                // Auto-hide sidebar when window becomes minimized
                 if !wasMinimized && isWindowMinimized && sidebarVisible {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         sidebarVisible = false
                     }
                 }
-                // Auto-show sidebar when window becomes normal size
                 else if wasMinimized && !isWindowMinimized && !sidebarVisible {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         sidebarVisible = true
@@ -1053,7 +1237,7 @@ struct JobListView: View {
                 }
             }
             
-            // Error message
+            // Error
             if let error = jobManager.lastError {
                 HStack {
                     Image(systemName: "exclamationmark.triangle")
@@ -1086,7 +1270,6 @@ struct JobRow: View {
                 jobManager.selectedJob = nil
             } else {
                 jobManager.selectedJob = job
-                // Auto-hide sidebar when minimized and job is selected
                 if isWindowMinimized && sidebarVisible {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         sidebarVisible = false
@@ -1216,7 +1399,7 @@ struct JobDetailPane: View {
                             .lineSpacing(4)
                             .fixedSize(horizontal: false, vertical: true)
                         
-                        // Required qualifications if available
+                        // Required qualifications if available (they're not but if...)
                         if let required = job.requiredQualifications {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Required Qualifications")
@@ -1229,25 +1412,10 @@ struct JobDetailPane: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        
-                        // Preferred qualifications if available
-                        if let preferred = job.preferredQualifications {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Preferred Qualifications")
-                                    .font(.headline)
-                                    .fontWeight(.semibold)
-                                
-                                Text(preferred)
-                                    .font(.body)
-                                    .lineSpacing(4)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
                     }
                     
                     Spacer(minLength: 20)
                     
-                    // Apply button
                     Button(action: {
                         jobManager.openJob(job)
                     }) {
@@ -1290,13 +1458,21 @@ struct SettingsView: View {
             
             Form {
                 Section("Job Filters") {
-                    TextField("Job Title", text: $titleFilter)
-                        .textFieldStyle(.roundedBorder)
-                        .help("Enter keywords to filter job titles (e.g., 'Software Engineer')")
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("Job Titles", text: $titleFilter)
+                            .textFieldStyle(.roundedBorder)
+                        Text("Separate multiple titles with commas (e.g., 'product manager, program manager, director')")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                     
-                    TextField("Location", text: $locationFilter)
-                        .textFieldStyle(.roundedBorder)
-                        .help("Enter location to filter jobs (e.g., 'Seattle' or 'Remote')")
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("Locations", text: $locationFilter)
+                            .textFieldStyle(.roundedBorder)
+                        Text("Separate multiple locations with commas (e.g., 'seattle, redmond, austin')")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 
                 Section("Fetch Settings") {
