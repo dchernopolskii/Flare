@@ -124,8 +124,11 @@ struct Job: Identifiable, Codable, Equatable {
     }
     
     var cleanDescription: String {
+        // First decode HTML entities using NSAttributedString for comprehensive decoding
+        let htmlDecoded = decodeHTMLEntities(description)
+        
         // Remove HTML tags but preserve structure
-        var text = description
+        var text = htmlDecoded
             .replacingOccurrences(of: "<br>", with: "\n")
             .replacingOccurrences(of: "<br/>", with: "\n")
             .replacingOccurrences(of: "<br />", with: "\n")
@@ -142,18 +145,6 @@ struct Job: Identifiable, Codable, Equatable {
         
         // Remove remaining HTML tags
         text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        text = text
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&#8217;", with: "\u{2019}")
-            .replacingOccurrences(of: "&#8220;", with: "\u{201C}")
-            .replacingOccurrences(of: "&#8221;", with: "\u{201D}")
-            .replacingOccurrences(of: "&#8211;", with: "\u{2013}")
-            .replacingOccurrences(of: "&#8212;", with: "\u{2014}")
         
         let lines = text.components(separatedBy: .newlines)
         let cleanedLines = lines.map { line in
@@ -177,6 +168,60 @@ struct Job: Identifiable, Codable, Equatable {
         }
         
         return result.joined(separator: "\n")
+    }
+    
+    private func decodeHTMLEntities(_ html: String) -> String {
+        guard let data = html.data(using: .utf8) else { return html }
+        
+        do {
+            // Use NSAttributedString to decode HTML entities
+            let attributedString = try NSAttributedString(
+                data: data,
+                options: [
+                    .documentType: NSAttributedString.DocumentType.html,
+                    .characterEncoding: String.Encoding.utf8.rawValue
+                ],
+                documentAttributes: nil
+            )
+            return attributedString.string
+        } catch {
+            return manualDecodeHTMLEntities(html)
+        }
+    }
+    
+    private func manualDecodeHTMLEntities(_ text: String) -> String {
+        return text
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&ldquo;", with: """
+            )
+            .replacingOccurrences(of: "&rdquo;", with:
+ """)
+            .replacingOccurrences(of: "&lsquo;", with: "'")
+            .replacingOccurrences(of: "&rsquo;", with: "'")
+            .replacingOccurrences(of: "&ndash;", with: "–")
+            .replacingOccurrences(of: "&mdash;", with: "—")
+            .replacingOccurrences(of: "&hellip;", with: "…")
+            .replacingOccurrences(of: "&bull;", with: "•")
+            .replacingOccurrences(of: "&copy;", with: "©")
+            .replacingOccurrences(of: "&reg;", with: "®")
+            .replacingOccurrences(of: "&trade;", with: "™")
+            // Numeric character references
+            .replacingOccurrences(of: "&#8216;", with: "'")
+            .replacingOccurrences(of: "&#8217;", with: "'")
+            .replacingOccurrences(of: "&#8220;", with: """
+            )
+            .replacingOccurrences(of: "&#8221;", with:
+ """)
+            .replacingOccurrences(of: "&#8211;", with: "–")
+            .replacingOccurrences(of: "&#8212;", with: "—")
+            .replacingOccurrences(of: "&#8230;", with: "…")
+            .replacingOccurrences(of: "&#8226;", with: "•")
     }
     
     var overview: String {
@@ -299,6 +344,7 @@ class JobManager: ObservableObject {
     @Published var filteredCount = 0
     @Published var totalAvailableJobs = 0
     @Published var newJobsCount = 0
+    @Published var appliedJobIds: Set<String> = []
     
     @AppStorage("jobTitleFilter") var jobTitleFilter = ""
     @AppStorage("locationFilter") var locationFilter = ""
@@ -310,6 +356,7 @@ class JobManager: ObservableObject {
     
     private init() {
         loadStoredJobIds()
+        loadAppliedJobIds()
         loadJobs()
     }
     
@@ -460,8 +507,24 @@ class JobManager: ObservableObject {
     
     func openJob(_ job: Job) {
         if let url = URL(string: job.url) {
+            // Mark job as applied when opening the URL
+            appliedJobIds.insert(job.id)
+            saveAppliedJobIds()
             NSWorkspace.shared.open(url)
         }
+    }
+    
+    func toggleAppliedStatus(for job: Job) {
+        if appliedJobIds.contains(job.id) {
+            appliedJobIds.remove(job.id)
+        } else {
+            appliedJobIds.insert(job.id)
+        }
+        saveAppliedJobIds()
+    }
+    
+    func isJobApplied(_ job: Job) -> Bool {
+        return appliedJobIds.contains(job.id)
     }
     
     // MARK: - Persistence
@@ -475,6 +538,12 @@ class JobManager: ObservableObject {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MicrosoftJobMonitor")
             .appendingPathComponent("storedIds.json")
+    }
+    
+    private var appliedJobsURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MicrosoftJobMonitor")
+            .appendingPathComponent("appliedJobs.json")
     }
     
     private func saveJobs() {
@@ -516,6 +585,29 @@ class JobManager: ObservableObject {
             print("Loaded \(storedJobIds.count) stored job IDs")
         } catch {
             print("Failed to load stored IDs: \(error)")
+        }
+    }
+    
+    private func saveAppliedJobIds() {
+        do {
+            let data = try JSONEncoder().encode(Array(appliedJobIds))
+            try FileManager.default.createDirectory(at: appliedJobsURL.deletingLastPathComponent(),
+                                                   withIntermediateDirectories: true)
+            try data.write(to: appliedJobsURL)
+            print("Saved \(appliedJobIds.count) applied job IDs")
+        } catch {
+            print("Failed to save applied IDs: \(error)")
+        }
+    }
+    
+    private func loadAppliedJobIds() {
+        do {
+            let data = try Data(contentsOf: appliedJobsURL)
+            let ids = try JSONDecoder().decode([String].self, from: data)
+            appliedJobIds = Set(ids)
+            print("Loaded \(appliedJobIds.count) applied job IDs")
+        } catch {
+            print("Failed to load applied IDs: \(error)")
         }
     }
 }
@@ -791,7 +883,7 @@ actor MicrosoftJobFetcher {
             var cleanTitle = msJob.title
             var extractedLocation: String? = nil
             
-            // Method 1: Check for location after dash in title
+            // Check for location after dash in title
             if msJob.title.contains(" - ") {
                 let parts = msJob.title.components(separatedBy: " - ")
                 if parts.count > 1 {
@@ -1284,10 +1376,25 @@ struct JobRow: View {
                     .frame(width: 30)
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(job.title)
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
+                    HStack {
+                        Text(job.title)
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                        
+                        if jobManager.isJobApplied(job) {
+                            Text("APPLIED")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.green)
+                                .cornerRadius(4)
+                        }
+                        
+                        Spacer()
+                    }
                     
                     HStack {
                         Label(job.location, systemImage: "location")
@@ -1317,6 +1424,8 @@ struct JobRow: View {
                 Group {
                     if isSelected {
                         Color.accentColor.opacity(0.1)
+                    } else if jobManager.isJobApplied(job) {
+                        Color.green.opacity(0.05)
                     } else if isHovered {
                         Color.gray.opacity(0.05)
                     } else {
@@ -1329,6 +1438,23 @@ struct JobRow: View {
         .buttonStyle(.plain)
         .onHover { hovering in
             isHovered = hovering
+        }
+        .contextMenu {
+            Button(action: {
+                jobManager.toggleAppliedStatus(for: job)
+            }) {
+                if jobManager.isJobApplied(job) {
+                    Label("Mark as Not Applied", systemImage: "xmark.circle")
+                } else {
+                    Label("Mark as Applied", systemImage: "checkmark.circle")
+                }
+            }
+            
+            Button(action: {
+                jobManager.openJob(job)
+            }) {
+                Label("Open Job Page", systemImage: "arrow.up.right.square")
+            }
         }
     }
 }
@@ -1416,17 +1542,35 @@ struct JobDetailPane: View {
                     
                     Spacer(minLength: 20)
                     
-                    Button(action: {
-                        jobManager.openJob(job)
-                    }) {
-                        Text("Apply on Microsoft Careers")
+                    VStack(spacing: 8) {
+                        Button(action: {
+                            jobManager.openJob(job)
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.up.right.square")
+                                Text("Apply on Microsoft Careers")
+                            }
                             .font(.callout)
                             .fontWeight(.medium)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        
+                        Button(action: {
+                            jobManager.toggleAppliedStatus(for: job)
+                        }) {
+                            HStack {
+                                Image(systemName: jobManager.isJobApplied(job) ? "xmark.circle" : "checkmark.circle")
+                                Text(jobManager.isJobApplied(job) ? "Mark as Not Applied" : "Mark as Applied")
+                            }
+                            .font(.callout)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
                 }
                 .padding()
             }
@@ -1461,7 +1605,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         TextField("Job Titles", text: $titleFilter)
                             .textFieldStyle(.roundedBorder)
-                        Text("Separate multiple titles with commas (e.g., 'product manager, program manager, director')")
+                        Text("Separate multiple titles with commas (e.g., 'product manager, software engineer, accountant')")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
