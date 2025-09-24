@@ -211,7 +211,6 @@ struct Job: Identifiable, Codable, Equatable {
             .replacingOccurrences(of: "&copy;", with: "©")
             .replacingOccurrences(of: "&reg;", with: "®")
             .replacingOccurrences(of: "&trade;", with: "™")
-            // Numeric character references
             .replacingOccurrences(of: "&#8216;", with: "'")
             .replacingOccurrences(of: "&#8217;", with: "'")
             .replacingOccurrences(of: "&#8220;", with: """
@@ -225,10 +224,8 @@ struct Job: Identifiable, Codable, Equatable {
     }
     
     var overview: String {
-        // Extract the main description before qualifications
         let text = cleanDescription
         
-        // Find where qualifications start
         let qualificationMarkers = [
             "Required/Minimum Qualifications",
             "Required Qualifications",
@@ -352,7 +349,7 @@ class JobManager: ObservableObject {
     @AppStorage("maxPagesToFetch") var maxPagesToFetch = 5
     
     private var timer: Timer?
-    private var storedJobIds: Set<String> = []
+    var storedJobIds: Set<String> = []
     
     private init() {
         loadStoredJobIds()
@@ -368,14 +365,14 @@ class JobManager: ObservableObject {
     }
     
     func startMonitoring() async {
-        await fetchJobs()
-        
+        await fetchJobsWithBoards()
+
         // Setup timer
         await MainActor.run {
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: refreshInterval * 60, repeats: true) { _ in
                 Task {
-                    await self.fetchJobs()
+                    await self.fetchJobsWithBoards()
                 }
             }
         }
@@ -389,13 +386,12 @@ class JobManager: ObservableObject {
         do {
             let fetcher = MicrosoftJobFetcher()
             
-            // Parse comma-separated filters before passing to fetcher
             let titleKeywords = jobTitleFilter.isEmpty ? [] :
                 jobTitleFilter.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             
             let fetchedJobs = try await fetcher.fetchJobs(
                 titleKeywords: titleKeywords,
-                location: locationFilter, // This will be parsed inside fetchJobs
+                location: locationFilter,
                 maxPages: Int(maxPagesToFetch)
             )
             
@@ -407,7 +403,6 @@ class JobManager: ObservableObject {
             filteredCount = recentJobs.count
             print("Filtered to \(recentJobs.count) jobs from last 24 hours")
             
-            // Deduplicate and find new jobs
             var uniqueJobs: [Job] = []
             var newJobs: [Job] = []
             var seenIds = Set<String>()
@@ -417,7 +412,6 @@ class JobManager: ObservableObject {
                     uniqueJobs.append(job)
                     seenIds.insert(job.id)
                     
-                    // Check if this is a new job
                     if !storedJobIds.contains(job.id) {
                         newJobs.append(job)
                         print("New job found: \(job.title) - \(job.id)")
@@ -425,12 +419,10 @@ class JobManager: ObservableObject {
                 }
             }
             
-            // Send notification for new jobs
             if !newJobs.isEmpty {
                 print("Sending notification for \(newJobs.count) new jobs")
                 sendGroupedNotification(for: newJobs)
                 
-                // Add new job IDs to stored set after sending notification
                 for job in newJobs {
                     storedJobIds.insert(job.id)
                 }
@@ -452,7 +444,7 @@ class JobManager: ObservableObject {
         isLoading = false
     }
     
-    private func sendGroupedNotification(for newJobs: [Job]) {
+    func sendGroupedNotification(for newJobs: [Job]) {
         if newJobs.count == 1 {
             // Single job notification
             let job = newJobs[0]
@@ -480,7 +472,10 @@ class JobManager: ObservableObject {
             // Multiple jobs - grouped notification
             let content = UNMutableNotificationContent()
             content.title = "\(newJobs.count) New Jobs Posted"
-            content.subtitle = "Microsoft Careers (Last 24h)"
+            
+            let sources = Set(newJobs.map { $0.source.rawValue })
+            let subtitle = sources.count == 1 ? sources.first! + " (Last 24h)" : "Multiple Sources (Last 24h)"
+            content.subtitle = subtitle
             
             let jobTitles = newJobs.prefix(3).map { "• \($0.title)" }.joined(separator: "\n")
             let moreText = newJobs.count > 3 ? "\n...and \(newJobs.count - 3) more" : ""
@@ -507,7 +502,7 @@ class JobManager: ObservableObject {
     
     func openJob(_ job: Job) {
         if let url = URL(string: job.url) {
-            // Mark job as applied when opening the URL
+            // Mark job as applied
             appliedJobIds.insert(job.id)
             saveAppliedJobIds()
             NSWorkspace.shared.open(url)
@@ -546,7 +541,7 @@ class JobManager: ObservableObject {
             .appendingPathComponent("appliedJobs.json")
     }
     
-    private func saveJobs() {
+    func saveJobs() {
         do {
             let data = try JSONEncoder().encode(jobs)
             try FileManager.default.createDirectory(at: jobsURL.deletingLastPathComponent(),
@@ -567,7 +562,7 @@ class JobManager: ObservableObject {
         }
     }
     
-    private func saveStoredJobIds() {
+    func saveStoredJobIds() {
         do {
             let data = try JSONEncoder().encode(Array(storedJobIds))
             try data.write(to: storedIdsURL)
@@ -638,7 +633,7 @@ actor MicrosoftJobFetcher {
         print("MULTI-QUERY: Parsed titles: \(titles)")
         print("MULTI-QUERY: Parsed locations: \(locations)")
         
-        // Generate individual search combinations
+        // Generate search combinations
         var searchCombinations: [(title: String, location: String)] = []
         
         if titles.isEmpty && locations.isEmpty {
@@ -674,7 +669,7 @@ actor MicrosoftJobFetcher {
             
             let jobs = try await executeIndividualSearch(title: combo.title, location: combo.location, maxPages: max(1, maxPages / searchCombinations.count))
             
-            // Deduplicate across all searches
+            // Deduplicate
             let newJobs = jobs.filter { job in
                 if globalSeenJobIds.contains(job.id) {
                     return false
@@ -696,162 +691,6 @@ actor MicrosoftJobFetcher {
         print("MULTI-QUERY: TOTAL RESULT: \(allJobs.count) unique jobs from \(searchCombinations.count) searches")
         return allJobs
     }
-
-    
-    
-    private func generateSearchQueries(parsedTitles: [String], parsedLocations: [String]) -> [SearchQuery] {
-        var queries: [SearchQuery] = []
-        
-        if parsedTitles.isEmpty && parsedLocations.isEmpty {
-            queries.append(SearchQuery(title: "", location: "", description: "Recent jobs"))
-            return queries
-        }
-        
-        if parsedTitles.isEmpty {
-            for location in parsedLocations {
-                queries.append(SearchQuery(title: "", location: location, description: "All jobs in \(location)"))
-                
-                let synonyms = getLocationSynonyms(for: location)
-                for synonym in synonyms.prefix(1) {
-                    queries.append(SearchQuery(title: "", location: synonym, description: "All jobs in \(synonym)"))
-                }
-            }
-        } else if parsedLocations.isEmpty {
-            for title in parsedTitles {
-                queries.append(SearchQuery(title: title, location: "", description: "\(title) roles"))
-                
-                let synonyms = getTitleSynonyms(for: title)
-                for synonym in synonyms.prefix(1) {
-                    queries.append(SearchQuery(title: synonym, location: "", description: "\(synonym) roles"))
-                }
-            }
-        } else {
-            // Combine titles and locations
-            for title in parsedTitles {
-                for location in parsedLocations {
-                    queries.append(SearchQuery(title: title, location: location, description: "\(title) in \(location)"))
-                }
-            }
-
-//            // broader searches with just titles
-//            for title in parsedTitles {
-//                queries.append(SearchQuery(title: title, location: "", description: "\(title) (any location)"))
-//            }
-        }
-        
-        return Array(queries.prefix(8))
-    }
-    
-    private func performSingleSearch(title: String, location: String, maxPages: Int) async throws -> [Job] {
-        var allJobs: [Job] = []
-        var seenJobIds = Set<String>()
-        var currentPage = 1
-        let pageLimit = min(maxPages, 5) // Reduced page limit per individual search
-        
-        while currentPage <= pageLimit {
-            var components = URLComponents(string: baseURL)!
-            
-            var queryParts: [String] = []
-            if !title.isEmpty {
-                queryParts.append(title)
-            }
-            if !location.isEmpty {
-                queryParts.append(location)
-            }
-            let queryString = queryParts.joined(separator: " ")
-            
-            components.queryItems = [
-                URLQueryItem(name: "l", value: "en_us"),
-                URLQueryItem(name: "pg", value: String(currentPage)),
-                URLQueryItem(name: "pgSz", value: "20"),
-                URLQueryItem(name: "o", value: "Recent"),
-                URLQueryItem(name: "flt", value: "true")
-            ]
-            
-            if !queryString.isEmpty {
-                components.queryItems?.append(URLQueryItem(name: "q", value: queryString))
-            }
-            
-            print("🌐 API Query: \(queryString.isEmpty ? "Recent jobs" : queryString)")
-            
-            var request = URLRequest(url: components.url!)
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
-            request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                print("❌ API error for query: \(queryString)")
-                break
-            }
-            
-            let pageJobs = try parseResponse(data, page: currentPage)
-            
-            let uniquePageJobs = pageJobs.filter { job in
-                if seenJobIds.contains(job.id) {
-                    return false
-                }
-                seenJobIds.insert(job.id)
-                return true
-            }
-            
-            allJobs.append(contentsOf: uniquePageJobs)
-            
-            if pageJobs.count < 20 {
-                break
-            }
-            
-            currentPage += 1
-            
-            try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
-        }
-        
-        return allJobs
-    }
-    
-    private func getTitleSynonyms(for title: String) -> [String] {
-        let lowercaseTitle = title.lowercased()
-        let synonymMap: [String: [String]] = [
-            "manager": ["director", "lead", "supervisor"],
-            "engineer": ["developer", "architect", "specialist"],
-            "product": ["program", "project"],
-            "software": ["dev", "engineering"],
-            "senior": ["principal", "staff", "sr"],
-            "program": ["product", "project"],
-            "developer": ["engineer", "dev"],
-            "data": ["analytics", "bi", "intelligence"],
-            "marketing": ["growth", "demand", "digital"],
-            "sales": ["account", "business development", "revenue"]
-        ]
-        
-        for (key, synonyms) in synonymMap {
-            if lowercaseTitle.contains(key) {
-                return synonyms
-            }
-        }
-        return []
-    }
-    
-    private func getLocationSynonyms(for location: String) -> [String] {
-        let lowercaseLocation = location.lowercased()
-        let locationMap: [String: [String]] = [
-            "washington": ["redmond", "seattle", "bellevue"],
-            "seattle": ["redmond", "bellevue", "kirkland"],
-            "california": ["mountain view", "san francisco", "los angeles"],
-            "texas": ["austin", "dallas", "houston"],
-            "new york": ["nyc", "manhattan"],
-            "boston": ["cambridge", "ma"],
-            "chicago": ["il", "illinois"]
-        ]
-        
-        for (key, synonyms) in locationMap {
-            if lowercaseLocation.contains(key) {
-                return synonyms.prefix(2).map { String($0) }
-            }
-        }
-        return []
-    }
     
     private func parseResponse(_ data: Data, page: Int = 1) throws -> [Job] {
         let decoder = JSONDecoder()
@@ -860,7 +699,6 @@ actor MicrosoftJobFetcher {
         let response = try decoder.decode(MSResponse.self, from: data)
         
         if page == 1 {
-            // Update total available jobs
             if let total = response.operationResult.result.totalJobs {
                 Task { @MainActor in
                     JobManager.shared.totalAvailableJobs = total
@@ -909,7 +747,7 @@ actor MicrosoftJobFetcher {
                 }
             }
             
-            // Look for known locations in the title itself
+            // Look for known locations in the title
             if extractedLocation == nil {
                 for location in knownLocations {
                     if msJob.title.contains(location) {
@@ -1014,8 +852,6 @@ actor MicrosoftJobFetcher {
     }
 }
 
-
-
 // MARK: - API Response Models
 struct MSResponse: Codable {
     let operationResult: OperationResult
@@ -1046,17 +882,6 @@ struct Properties: Codable {
     let discipline: String?
     let roleType: String?
     let employmentType: String?
-}
-
-enum FetchError: LocalizedError {
-    case invalidResponse
-    
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse:
-            return "Failed to fetch jobs from Microsoft"
-        }
-    }
 }
 
 // MARK: - Views
@@ -1215,7 +1040,6 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.3), value: sidebarVisible)
             .onAppear {
                 windowSize = geometry.size
-                // Hide sidebar by default if window starts minimized
                 if isWindowMinimized {
                     sidebarVisible = false
                 }
@@ -1267,31 +1091,30 @@ struct JobListView: View {
     @EnvironmentObject var jobManager: JobManager
     @Binding var sidebarVisible: Bool
     let isWindowMinimized: Bool
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
+        VStack(spacing: 0) {
+            // Header row
             HStack {
                 Text("Jobs (Last 24 Hours)")
                     .font(.title2)
                     .fontWeight(.semibold)
-                
+
                 Spacer()
-                
+
+                ConfigureJobBoardsButton()
+
                 Button(action: {
-                    Task {
-                        await jobManager.fetchJobs()
-                    }
+                    Task { await jobManager.fetchJobsWithBoards() }
                 }) {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(jobManager.isLoading)
             }
             .padding()
-            
+
             Divider()
-            
-            // Jobs list
+
             if jobManager.jobs.isEmpty && !jobManager.isLoading {
                 VStack(spacing: 8) {
                     Spacer()
@@ -1316,7 +1139,7 @@ struct JobListView: View {
                 .frame(maxWidth: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(jobManager.jobs) { job in
                             JobRow(
                                 job: job,
@@ -1329,7 +1152,6 @@ struct JobListView: View {
                 }
             }
             
-            // Error
             if let error = jobManager.lastError {
                 HStack {
                     Image(systemName: "exclamationmark.triangle")
@@ -1370,9 +1192,9 @@ struct JobRow: View {
             }
         }) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "briefcase")
+                Image(systemName: job.source.icon)
                     .font(.title3)
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(job.source.color)
                     .frame(width: 30)
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -1399,7 +1221,13 @@ struct JobRow: View {
                     HStack {
                         Label(job.location, systemImage: "location")
                         Spacer()
-                        Text(job.postingDate, style: .time)
+                        HStack(spacing: 4) {
+                            Text(job.postingDate, style: .time)
+                            Text("•")
+                            Text(job.source.rawValue)
+                                .font(.caption2)
+                                .foregroundColor(job.source.color)
+                        }
                     }
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -1455,6 +1283,11 @@ struct JobRow: View {
             }) {
                 Label("Open Job Page", systemImage: "arrow.up.right.square")
             }
+            
+            Divider()
+            
+            Text("Source: \(job.source.rawValue)")
+                .font(.caption)
         }
     }
 }
@@ -1462,14 +1295,26 @@ struct JobRow: View {
 struct JobDetailPane: View {
     let job: Job
     @EnvironmentObject var jobManager: JobManager
+    @State private var selectedSection = "overview"
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             HStack {
-                Text("Job Details")
-                    .font(.title3)
-                    .fontWeight(.semibold)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Job Details")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                    
+                    HStack(spacing: 6) {
+                        Image(systemName: job.source.icon)
+                            .foregroundColor(job.source.color)
+                            .font(.caption)
+                        Text(job.source.rawValue)
+                            .font(.caption)
+                            .foregroundColor(job.source.color)
+                    }
+                }
                 
                 Spacer()
                 
@@ -1489,9 +1334,24 @@ struct JobDetailPane: View {
                 VStack(alignment: .leading, spacing: 20) {
                     // Job header
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(job.title)
-                            .font(.title2)
-                            .fontWeight(.bold)
+                        HStack {
+                            Text(job.title)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                            
+                            Spacer()
+                            
+                            if jobManager.isJobApplied(job) {
+                                Text("APPLIED")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.green)
+                                    .cornerRadius(6)
+                            }
+                        }
                         
                         VStack(alignment: .leading, spacing: 8) {
                             Label(job.location, systemImage: "location")
@@ -1507,7 +1367,7 @@ struct JobDetailPane: View {
                         .foregroundColor(.secondary)
                         
                         if let flexibility = job.workSiteFlexibility, !flexibility.isEmpty {
-                            Label(flexibility, systemImage: "house.laptop")
+                            Label(flexibility, systemImage: "house")
                                 .font(.caption)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
@@ -1518,25 +1378,66 @@ struct JobDetailPane: View {
                     
                     Divider()
                     
-                    // Job description
+                    // Section Picker
+                    if job.requiredQualifications != nil || job.preferredQualifications != nil {
+                        Picker("Section", selection: $selectedSection) {
+                            Text("Overview").tag("overview")
+                            if job.requiredQualifications != nil {
+                                Text("Required").tag("required")
+                            }
+                            if job.preferredQualifications != nil {
+                                Text("Preferred").tag("preferred")
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    
+                    // Job content based on selection
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(job.overview)
-                            .font(.body)
-                            .lineSpacing(4)
-                            .fixedSize(horizontal: false, vertical: true)
-                        
-                        // Required qualifications if available (they're not but if...)
-                        if let required = job.requiredQualifications {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Required Qualifications")
-                                    .font(.headline)
-                                    .fontWeight(.semibold)
-                                
-                                Text(required)
+                        switch selectedSection {
+                        case "overview":
+                            if !job.overview.isEmpty {
+                                Text(job.overview)
                                     .font(.body)
                                     .lineSpacing(4)
                                     .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                Text("No description available.")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                                    .italic()
                             }
+                            
+                        case "required":
+                            if let required = job.requiredQualifications {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Required Qualifications")
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                    
+                                    Text(required)
+                                        .font(.body)
+                                        .lineSpacing(4)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            
+                        case "preferred":
+                            if let preferred = job.preferredQualifications {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Preferred Qualifications")
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                    
+                                    Text(preferred)
+                                        .font(.body)
+                                        .lineSpacing(4)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            
+                        default:
+                            EmptyView()
                         }
                     }
                     
@@ -1548,7 +1449,7 @@ struct JobDetailPane: View {
                         }) {
                             HStack {
                                 Image(systemName: "arrow.up.right.square")
-                                Text("Apply on Microsoft Careers")
+                                Text(job.applyButtonText)
                             }
                             .font(.callout)
                             .fontWeight(.medium)
@@ -1649,7 +1550,7 @@ struct SettingsView: View {
                         Button("Save and Refresh Now") {
                             saveSettings()
                             Task {
-                                await jobManager.fetchJobs()
+                                await jobManager.fetchJobsWithBoards()
                             }
                         }
                         
