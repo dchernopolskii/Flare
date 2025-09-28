@@ -19,7 +19,10 @@
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>
-		<dict/>
+		<dict>
+			<key>lifeattiktok.com</key>
+			<string></string>
+		</dict>
 	</dict>
 </dict>
 </plist>
