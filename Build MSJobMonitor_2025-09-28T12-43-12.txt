@@ -1,0 +1,37 @@
+
+Showing All Errors Only
+
+Build target MSJobMonitor of project MSJobMonitor with configuration Debug
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ MSJobMonitor (in target 'MSJobMonitor' from project 'MSJobMonitor')
+
+EmitSwiftModule normal arm64 (in target 'MSJobMonitor' from project 'MSJobMonitor')
+    cd /Users/dan/Documents/Projects/MSJobs
+    
+
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:47:9: error: value type 'TikTokJobCategory' cannot have a stored property that recursively contains it
+    let parent: TikTokJobCategory?
+        ^
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:47:9: note: cycle beginning here: TikTokJobCategory? -> (some(_:): TikTokJobCategory)
+    let parent: TikTokJobCategory?
+        ^
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:50:8: error: value type 'TikTokCityInfo' has infinite size
+struct TikTokCityInfo: Codable {
+       ^
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:54:9: note: cycle beginning here: TikTokLocationParent? -> (some(_:): TikTokLocationParent) -> (parent: TikTokLocationParent?)
+    let parent: TikTokLocationParent?
+        ^
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:61:9: error: value type 'TikTokLocationParent' cannot have a stored property that recursively contains it
+    let parent: TikTokLocationParent?
+        ^
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:61:9: note: cycle beginning here: TikTokLocationParent? -> (some(_:): TikTokLocationParent)
+    let parent: TikTokLocationParent?
+        ^
+
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:47:9: Value type 'TikTokJobCategory' cannot have a stored property that recursively contains it
+
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:50:8: Value type 'TikTokCityInfo' has infinite size
+
+/Users/dan/Documents/Projects/MSJobs/MSJobMonitor/Services/JobFetchers/TikTokJobFetcher.swift:61:9: Value type 'TikTokLocationParent' cannot have a stored property that recursively contains it
+
+
