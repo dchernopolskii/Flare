@@ -35,6 +35,20 @@ struct Job: Identifiable, Codable, Equatable {
         let hoursSinceFirstSeen = Date().timeIntervalSince(firstSeenDate) / 3600
         return hoursSinceFirstSeen <= 24 && hoursSinceFirstSeen >= 0
     }
+    // DEBUG
+    var isRecentOrCustomBoard: Bool {
+        if source == .microsoft || source == .tiktok {
+            return isRecent
+        }
+        
+        if let postingDate = postingDate {
+            let hoursSincePosting = Date().timeIntervalSince(postingDate) / 3600
+            return hoursSincePosting <= 168 // 7 days instead of 24 hours
+        }
+        
+        let hoursSinceFirstSeen = Date().timeIntervalSince(firstSeenDate) / 3600
+        return hoursSinceFirstSeen <= 24
+    }
     
     var cleanDescription: String {
         HTMLCleaner.cleanHTML(description)
@@ -164,15 +178,6 @@ enum JobSource: String, Codable, CaseIterable {
             return .breezyhr
         } else {
             return nil
-        }
-    }
-    
-    var isSupported: Bool {
-        switch self {
-        case .microsoft, .tiktok, .greenhouse:
-            return true
-        default:
-            return false
         }
     }
 }
@@ -305,5 +310,16 @@ class QualificationExtractor {
         }
         
         return nil
+    }
+}
+
+extension JobSource {
+    var isSupported: Bool {
+        switch self {
+        case .microsoft, .tiktok, .greenhouse, .ashby, .lever:
+            return true
+        default:
+            return false
+        }
     }
 }

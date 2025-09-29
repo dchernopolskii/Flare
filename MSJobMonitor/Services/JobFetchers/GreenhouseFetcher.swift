@@ -5,8 +5,6 @@
 //  Created by Dan Chernopolskii on 9/28/25.
 //
 
-
-
 import Foundation
 
 // MARK: - Greenhouse API Models
@@ -73,6 +71,12 @@ actor GreenhouseFetcher: JobFetcherProtocol {
             let fallbackFormatter = ISO8601DateFormatter()
             fallbackFormatter.formatOptions = [.withInternetDateTime]
             
+            // Parse comma-separated filters
+            let titleKeywords = parseFilterString(titleFilter)
+            let locationKeywords = parseFilterString(locationFilter)
+            
+            print("🌱 [Greenhouse] Applying filters - Title keywords: \(titleKeywords), Location keywords: \(locationKeywords)")
+            
             let jobs = decoded.jobs.compactMap { ghJob -> Job? in
                 var postingDate = Date()
                 if let dateString = ghJob.updated_at {
@@ -84,15 +88,26 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                 let location = ghJob.location?.name ?? "Location not specified"
                 let title = ghJob.title
                 
-                // Apply filters
-                if !titleFilter.isEmpty {
-                    let titleMatches = title.lowercased().contains(titleFilter.lowercased())
-                    if !titleMatches { return nil }
+                // Apply title filter (OR logic - match any keyword)
+                if !titleKeywords.isEmpty {
+                    let titleMatches = titleKeywords.contains { keyword in
+                        title.localizedCaseInsensitiveContains(keyword)
+                    }
+                    if !titleMatches {
+                        print("🌱 [Greenhouse] Filtered out by title: '\(title)' doesn't match any of \(titleKeywords)")
+                        return nil
+                    }
                 }
                 
-                if !locationFilter.isEmpty {
-                    let locationMatches = location.lowercased().contains(locationFilter.lowercased())
-                    if !locationMatches { return nil }
+                // Apply location filter (OR logic - match any keyword)
+                if !locationKeywords.isEmpty {
+                    let locationMatches = locationKeywords.contains { keyword in
+                        location.localizedCaseInsensitiveContains(keyword)
+                    }
+                    if !locationMatches {
+                        print("🌱 [Greenhouse] Filtered out by location: '\(location)' doesn't match any of \(locationKeywords)")
+                        return nil
+                    }
                 }
                 
                 let cleanDescription = HTMLCleaner.cleanHTML(ghJob.content ?? "")
@@ -113,13 +128,24 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                 )
             }
             
-            print("🌱 [Greenhouse] Parsed \(jobs.count) jobs from API")
+            print("🌱 [Greenhouse] Parsed \(jobs.count) jobs from API (after filtering)")
             return jobs
             
         } catch {
             print("🌱 [Greenhouse] JSON Parsing Error: \(error)")
             throw FetchError.parsingFailed
         }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func parseFilterString(_ filterString: String) -> [String] {
+        guard !filterString.isEmpty else { return [] }
+        
+        return filterString
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
     
     private func extractGreenhouseBoardSlug(from url: URL) -> String {

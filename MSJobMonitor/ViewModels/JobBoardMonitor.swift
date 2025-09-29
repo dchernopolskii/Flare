@@ -5,7 +5,6 @@
 //  Created by Dan Chernopolskii on 9/28/25.
 //
 
-
 import Foundation
 import SwiftUI
 
@@ -21,6 +20,8 @@ class JobBoardMonitor: ObservableObject {
     
     private let persistenceService = PersistenceService.shared
     private let greenhouseFetcher = GreenhouseFetcher()
+    private let ashbyFetcher = AshbyFetcher()
+    private let leverFetcher = LeverFetcher()
     private var monitorTimer: Timer?
     
     private init() {
@@ -88,7 +89,7 @@ class JobBoardMonitor: ObservableObject {
         
         do {
             let jobs = try await fetchJobsFromBoard(config, titleFilter: "", locationFilter: "")
-            let message = "✅ Found \(jobs.count) jobs"
+            let message = "✅ Successfully fetched \(jobs.count) jobs"
             testResults[config.id] = message
             
             var updatedConfig = config
@@ -97,13 +98,20 @@ class JobBoardMonitor: ObservableObject {
             
             print("✅ Test successful for \(config.displayName): \(jobs.count) jobs found")
             
+            if !jobs.isEmpty {
+                print("📋 Sample jobs from \(config.displayName):")
+                for job in jobs.prefix(3) {
+                    print("  - \(job.title) | \(job.location)")
+                }
+            }
+            
         } catch {
             let message = "❌ Error: \(error.localizedDescription)"
             testResults[config.id] = message
             print("❌ Test failed for \(config.displayName): \(error)")
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
             self.testResults.removeValue(forKey: config.id)
         }
     }
@@ -142,13 +150,11 @@ class JobBoardMonitor: ObservableObject {
         switch config.source {
         case .greenhouse:
             return try await greenhouseFetcher.fetchGreenhouseJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
+        case .ashby:
+            return try await ashbyFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
         case .lever:
-            return try await LeverFetcher().fetchJobs(
-                titleKeywords: titleFilter.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) },
-                location: locationFilter,
-                maxPages: 1
-            )
-        case .workable, .jobvite, .bamboohr, .smartrecruiters, .ashby, .jazzhr, .recruitee, .breezyhr:
+            return try await leverFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
+        case .workable, .jobvite, .bamboohr, .smartrecruiters, .jazzhr, .recruitee, .breezyhr:
             throw FetchError.notImplemented(config.source.rawValue)
         default:
             return []

@@ -115,24 +115,55 @@ struct AddBoardSection: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             
-            // Action Buttons
             HStack {
-                Button("Add Board") {
+                Button("Add & Test Board") {
                     addBoard(andTest: false)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!isValidBoard)
-                
-                Button("Add & Test") {
-                    addBoard(andTest: true)
-                }
-                .buttonStyle(.bordered)
                 .disabled(!isValidBoard || testingBoardId != nil)
+                
+                // Show loading state
+                if testingBoardId != nil {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Testing board...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            
+            // Show test results more prominently
+            if !monitor.testResults.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Recent Test Results", systemImage: "checkmark.circle")
+                        .font(.headline)
+                    
+                    ForEach(Array(monitor.testResults.keys), id: \.self) { boardId in
+                        if let result = monitor.testResults[boardId],
+                           let boardName = monitor.boardConfigs.first(where: { $0.id == boardId })?.displayName {
+                            HStack {
+                                Text(boardName)
+                                    .font(.callout)
+                                    .fontWeight(.medium)
+                                Spacer()
+                                Text(result)
+                                    .font(.callout)
+                                    .foregroundColor(result.hasPrefix("✅") ? .green : .red)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                            .cornerRadius(4)
+                        }
+                    }
+                }
+                .padding()
+                .background(Color.blue.opacity(0.05))
+                .cornerRadius(8)
             }
         }
-        .padding()
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
     }
     
     private func addBoard(andTest: Bool) {
@@ -144,24 +175,18 @@ struct AddBoardSection: View {
         
         monitor.addBoardConfig(config)
         
-        if andTest {
-            testingBoardId = config.id
-            Task {
-                await monitor.testSingleBoard(config)
-                await MainActor.run {
-                    testingBoardId = nil
-                }
+        // Always test the board when adding it
+        testingBoardId = config.id
+        Task {
+            await monitor.testSingleBoard(config)
+            await MainActor.run {
+                testingBoardId = nil
             }
         }
         
         // Clear fields
         newBoardName = ""
         newBoardURL = ""
-        
-        // Fetch jobs after adding new board
-        Task {
-            await jobManager.fetchAllJobs()
-        }
     }
 }
 
@@ -258,9 +283,32 @@ struct BoardConfigRow: View {
                     
                     // Test result
                     if let testResult = monitor.testResults[config.id] {
-                        Text(testResult)
-                            .font(.caption2)
-                            .foregroundColor(testResult.hasPrefix("✅") ? .green : .red)
+                        HStack {
+                            if testResult == "Testing..." {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            } else if testResult.hasPrefix("✅") {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            } else {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                            }
+                            
+                            Text(testResult.replacingOccurrences(of: "✅ ", with: "").replacingOccurrences(of: "❌ ", with: ""))
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(testResult.hasPrefix("✅") ? .green : testResult == "Testing..." ? .blue : .red)
+                                .lineLimit(2)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(testResult.hasPrefix("✅") ? Color.green.opacity(0.1) :
+                                      testResult == "Testing..." ? Color.blue.opacity(0.1) :
+                                      Color.red.opacity(0.1))
+                        )
                     }
                 }
             }

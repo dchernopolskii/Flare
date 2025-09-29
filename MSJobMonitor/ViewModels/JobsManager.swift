@@ -274,8 +274,10 @@ class JobManager: ObservableObject {
     }
     
     private func filterNewJobs(_ jobs: [Job]) -> [Job] {
+//        return jobs.filter { job in
+//            job.isRecent && !storedJobIds.contains(job.id)
         return jobs.filter { job in
-            job.isRecent && !storedJobIds.contains(job.id)
+            job.isRecentOrCustomBoard && !storedJobIds.contains(job.id)
         }
     }
     
@@ -283,7 +285,8 @@ class JobManager: ObservableObject {
         // Add new job IDs to stored set
         newJobs.forEach { storedJobIds.insert($0.id) }
         
-        let recentJobs = allFetched.filter { $0.isRecent }
+//        let recentJobs = allFetched.filter { $0.isRecent }
+        let recentJobs = allFetched.filter { $0.isRecentOrCustomBoard }
         
         var uniqueJobs: [Job] = []
         var seenIds = Set<String>()

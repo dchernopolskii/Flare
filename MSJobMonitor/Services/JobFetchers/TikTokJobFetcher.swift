@@ -37,7 +37,6 @@ actor TikTokJobFetcher: JobFetcherProtocol {
                     break
                 }
                 
-                // Convert to unified Job model
                 let converted = pageJobs.compactMap { tikTokJob -> Job? in
                     let locationString = buildLocationString(from: tikTokJob.city_info)
                     let isNewJob = !storedJobIds.contains("tiktok-\(tikTokJob.id)")
@@ -59,18 +58,34 @@ actor TikTokJobFetcher: JobFetcherProtocol {
                     )
                 }
                 
+                let titleKeywordsFiltered = titleKeywords.filter { !$0.isEmpty }
+                let locationKeywords = parseFilterString(location)
+                
+                print("🎵 [TikTok] Applying filters - Title keywords: \(titleKeywordsFiltered), Location keywords: \(locationKeywords)")
+                
                 let filtered = converted.filter { job in
                     var matches = true
-                    if !titleKeywords.isEmpty {
-                        matches = titleKeywords.contains { keyword in
+                    if !titleKeywordsFiltered.isEmpty {
+                        matches = titleKeywordsFiltered.contains { keyword in
                             job.title.localizedCaseInsensitiveContains(keyword)
                         }
+                        if !matches {
+                            print("🎵 [TikTok] Filtered out by title: '\(job.title)' doesn't match any of \(titleKeywordsFiltered)")
+                        }
                     }
-                    if matches && !location.isEmpty {
-                        matches = job.location.localizedCaseInsensitiveContains(location)
+                    
+                    if matches && !locationKeywords.isEmpty {
+                        matches = locationKeywords.contains { keyword in
+                            job.location.localizedCaseInsensitiveContains(keyword)
+                        }
+                        if !matches {
+                            print("🎵 [TikTok] Filtered out by location: '\(job.location)' doesn't match any of \(locationKeywords)")
+                        }
                     }
+                    
                     return matches
                 }
+                
                 allJobs.append(contentsOf: filtered)
                                 
                 if pageJobs.count < pageSize {
@@ -88,10 +103,18 @@ actor TikTokJobFetcher: JobFetcherProtocol {
             }
         }
         
-        // Persist job IDs
         await saveNewTikTokJobIds(allJobs.map { $0.id })
         print("🎵 [TikTok] Completed fetch: \(allJobs.count) jobs")
         return allJobs
+    }
+
+    private func parseFilterString(_ filterString: String) -> [String] {
+        guard !filterString.isEmpty else { return [] }
+        
+        return filterString
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
     
     // MARK: - Page Fetch
