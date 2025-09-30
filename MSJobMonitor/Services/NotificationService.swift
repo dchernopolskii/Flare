@@ -21,9 +21,7 @@ class NotificationService: NSObject {
     private func setupNotifications() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if granted {
-                print("✅ Notification permission granted")
             } else if let error = error {
-                print("❌ Notification permission error: \(error)")
             }
         }
         
@@ -62,9 +60,7 @@ class NotificationService: NSObject {
         
         do {
             try await UNUserNotificationCenter.current().add(request)
-            print("📬 Notification sent for job: \(job.title)")
         } catch {
-            print("❌ Error sending notification: \(error)")
         }
     }
     
@@ -94,9 +90,7 @@ class NotificationService: NSObject {
         
         do {
             try await UNUserNotificationCenter.current().add(request)
-            print("📬 Grouped notification sent for \(jobs.count) jobs")
         } catch {
-            print("❌ Error sending grouped notification: \(error)")
         }
     }
     

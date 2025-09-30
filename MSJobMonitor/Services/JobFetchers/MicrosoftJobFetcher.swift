@@ -5,14 +5,59 @@
 //  Created by Dan Chernopolskii on 9/28/25.
 //
 
-
 import Foundation
 
 actor MicrosoftJobFetcher: JobFetcherProtocol {
     private let baseURL = "https://gcsservices.careers.microsoft.com/search/api/v1/search"
     
+    struct ParsedLocation {
+        let city: String
+        let state: String
+        let country: String
+        let isMultiple: Bool
+        let isRemote: Bool
+        
+        init(from location: String) {
+            let parts = location.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            
+            if parts.count >= 3 {
+                self.country = parts.last ?? ""
+                self.state = parts.count > 2 ? parts[parts.count - 2] : ""
+                self.city = parts.count > 2 ? parts[parts.count - 3] : ""
+                self.isMultiple = city.contains("Multiple Locations")
+            } else if parts.count == 2 {
+                self.country = parts.last ?? ""
+                self.state = parts.first ?? ""
+                self.city = ""
+                self.isMultiple = false
+            } else {
+                self.country = location
+                self.state = ""
+                self.city = ""
+                self.isMultiple = false
+            }
+            
+            self.isRemote = location.lowercased().contains("remote")
+        }
+        
+        var displayString: String {
+            if isMultiple {
+                return "Multiple Locations, \(country)"
+            } else if !city.isEmpty && !state.isEmpty {
+                return "\(city), \(state)"
+            } else if !state.isEmpty {
+                return state
+            } else {
+                return country
+            }
+        }
+    }
+    
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int = 5) async throws -> [Job] {
-        print("ðŸ”· [Microsoft] Starting with titles: \(titleKeywords), location: '\(location)'")
+        print("🔵 [Microsoft] Starting fetch with location: '\(location)'")
+        
+        let targetCountries = extractTargetCountries(from: location)
+        print("🔵 [Microsoft] Target countries: \(targetCountries)")
         
         var allJobs: [Job] = []
         var globalSeenJobIds = Set<String>()
@@ -22,9 +67,6 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
         }.filter { !$0.isEmpty }
         
         let titles = titleKeywords.filter { !$0.isEmpty }
-        
-        print("ðŸ”· [Microsoft] Parsed titles: \(titles)")
-        print("ðŸ”· [Microsoft] Parsed locations: \(locations)")
         
         var searchCombinations: [(title: String, location: String)] = []
         
@@ -46,8 +88,6 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             }
         }
         
-        print("ðŸ”· [Microsoft] Will make \(searchCombinations.count) separate API calls")
-        
         for (index, combo) in searchCombinations.enumerated() {
             let description = [combo.title, combo.location].filter { !$0.isEmpty }.joined(separator: " in ")
             
@@ -58,6 +98,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             let jobs = try await executeIndividualSearch(
                 title: combo.title,
                 location: combo.location,
+                targetCountries: targetCountries,
                 maxPages: max(1, maxPages / searchCombinations.count)
             )
             
@@ -70,20 +111,96 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             }
             
             allJobs.append(contentsOf: newJobs)
-            print("ðŸ”· [Microsoft] Search \(index + 1) returned \(newJobs.count) new unique jobs")
             
-            try await Task.sleep(nanoseconds: 700_000_000) // 0.7 seconds
+            try await Task.sleep(nanoseconds: 700_000_000)
         }
         
         await MainActor.run {
             JobManager.shared.loadingProgress = ""
         }
         
-        print("ðŸ”· [Microsoft] TOTAL RESULT: \(allJobs.count) unique jobs from \(searchCombinations.count) searches")
+        print("🔵 [Microsoft] Total jobs returned: \(allJobs.count)")
         return allJobs
     }
     
-    private func executeIndividualSearch(title: String, location: String, maxPages: Int) async throws -> [Job] {
+    private func extractTargetCountries(from locationFilter: String) -> Set<String> {
+        guard !locationFilter.isEmpty else {
+            return ["United States", "Canada"]
+        }
+        
+        let filterLower = locationFilter.lowercased()
+        var countries = Set<String>()
+        
+        let countryMappings: [String: String] = [
+            // US
+            "seattle": "United States",
+            "redmond": "United States",
+            "bellevue": "United States",
+            "san francisco": "United States",
+            "sf": "United States",
+            "bay area": "United States",
+            "mountain view": "United States",
+            "sunnyvale": "United States",
+            "san jose": "United States",
+            "los angeles": "United States",
+            "la": "United States",
+            "new york": "United States",
+            "nyc": "United States",
+            "boston": "United States",
+            "austin": "United States",
+            "chicago": "United States",
+            "atlanta": "United States",
+            "usa": "United States",
+            "united states": "United States",
+            "us": "United States",
+            
+            // Canada
+            "toronto": "Canada",
+            "vancouver": "Canada",
+            "montreal": "Canada",
+            "ottawa": "Canada",
+            "canada": "Canada",
+            
+            // UK
+            "london": "United Kingdom",
+            "manchester": "United Kingdom",
+            "uk": "United Kingdom",
+            "united kingdom": "United Kingdom",
+            
+            // Ireland
+            "dublin": "Ireland",
+            "cork": "Ireland",
+            "ireland": "Ireland",
+            
+            // Australia
+            "sydney": "Australia",
+            "melbourne": "Australia",
+            "australia": "Australia",
+            
+            // India
+            "bangalore": "India",
+            "bengaluru": "India",
+            "hyderabad": "India",
+            "pune": "India",
+            "delhi": "India",
+            "mumbai": "India",
+            "india": "India"
+        ]
+        
+        for (keyword, country) in countryMappings {
+            if filterLower.contains(keyword) {
+                countries.insert(country)
+            }
+        }
+        
+        if countries.isEmpty {
+            countries.insert("United States")
+        }
+        
+        return countries
+    }
+    
+    private func executeIndividualSearch(title: String, location: String, targetCountries: Set<String>, maxPages: Int) async throws -> [Job] {
         var jobs: [Job] = []
         let pageLimit = min(maxPages, 3)
         
@@ -104,8 +221,6 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
                 components.queryItems?.append(URLQueryItem(name: "q", value: queryString))
             }
             
-            print("ðŸ”· [Microsoft] API call with query: '\(queryString)' (page \(page))")
-            
             var request = URLRequest(url: components.url!)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
@@ -114,78 +229,60 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                print("ðŸ”· [Microsoft] API error for query: '\(queryString)'")
                 break
             }
             
-            let pageJobs = try parseResponse(data)
+            let pageJobs = try parseResponse(data, targetCountries: targetCountries)
             jobs.append(contentsOf: pageJobs)
             
             if pageJobs.count < 20 {
                 break
             }
             
-            try await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            try await Task.sleep(nanoseconds: 300_000_000)
         }
         
         return jobs
     }
     
-    private func parseResponse(_ data: Data) throws -> [Job] {
+    private func parseResponse(_ data: Data, targetCountries: Set<String>) throws -> [Job] {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         
         let response = try decoder.decode(MSResponse.self, from: data)
         
-        return response.operationResult.result.jobs.map { msJob in
-            let knownLocations = [
-                "Redmond", "Seattle", "Bellevue", "Mountain View", "Sunnyvale",
-                "San Francisco", "New York", "NYC", "Austin", "Atlanta",
-                "Boston", "Chicago", "Denver", "Los Angeles", "Phoenix",
-                "San Diego", "Washington DC", "DC", "Toronto", "Vancouver",
-                "London", "Dublin", "Paris", "Berlin", "Munich", "Amsterdam",
-                "Stockholm", "Tokyo", "Beijing", "Shanghai", "Singapore",
-                "Sydney", "Melbourne", "Bangalore", "Hyderabad", "Delhi",
-                "Tel Aviv", "Dubai", "Cairo", "Lagos", "Nairobi", "Johannesburg"
-            ]
+        var filteredJobs: [Job] = []
+        var filteredOutCount = 0
+        
+        for msJob in response.operationResult.result.jobs {
+            let jobLocations = msJob.properties?.locations ?? []
+            let primaryLocation = msJob.properties?.primaryLocation ?? ""
             
-            var cleanTitle = msJob.title
-            var extractedLocation: String? = nil
-            
-            // Extract location from title
-            if msJob.title.contains(" - ") {
-                let parts = msJob.title.components(separatedBy: " - ")
-                if parts.count > 1 {
-                    let lastPart = parts.last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    if knownLocations.contains(where: { lastPart.contains($0) }) || lastPart.count < 30 {
-                        cleanTitle = parts.dropLast().joined(separator: " - ")
-                        extractedLocation = lastPart
-                    }
-                }
+            var allLocations = jobLocations
+            if !primaryLocation.isEmpty && !allLocations.contains(primaryLocation) {
+                allLocations.append(primaryLocation)
             }
             
-            // Check for location in parentheses
-            if extractedLocation == nil,
-               let range = msJob.title.range(of: #"\(([^)]+)\)"#, options: .regularExpression) {
-                let location = String(msJob.title[range])
-                    .replacingOccurrences(of: "(", with: "")
-                    .replacingOccurrences(of: ")", with: "")
-                if knownLocations.contains(where: { location.contains($0) }) {
-                    extractedLocation = location
-                    cleanTitle = msJob.title.replacingOccurrences(of: #"\s*\([^)]+\)"#,
-                                                                  with: "",
-                                                                  options: .regularExpression)
-                }
+            if allLocations.isEmpty {
+                continue
             }
             
-            var location: String = "Location not specified"
+            let parsedLocations = allLocations.map { ParsedLocation(from: $0) }
+            let jobCountries = Set(parsedLocations.map { $0.country })
             
-            if let primaryLoc = msJob.properties?.primaryLocation, !primaryLoc.isEmpty {
-                location = primaryLoc
-            } else if let locations = msJob.properties?.locations, !locations.isEmpty {
-                location = locations[0]
-            } else if let extracted = extractedLocation {
-                location = extracted
+            let hasTargetCountry = !targetCountries.isDisjoint(with: jobCountries)
+            
+            if !hasTargetCountry {
+                filteredOutCount += 1
+                print("🚫 [Microsoft] Filtered out: \(msJob.title) - Countries: \(jobCountries)")
+                continue
+            }
+            
+            let displayLocation: String
+            if let matchingLocation = parsedLocations.first(where: { targetCountries.contains($0.country) }) {
+                displayLocation = matchingLocation.displayString
+            } else {
+                displayLocation = parsedLocations.first?.displayString ?? "Location not specified"
             }
             
             let workSiteFlexibility = msJob.properties?.workSiteFlexibility ?? ""
@@ -196,18 +293,26 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
                            workSiteFlexibility.lowercased().contains("remote") ||
                            workSiteFlexibility.lowercased().contains("work from home")
             
-            if location != "Location not specified" {
-                if isHybrid {
-                    location += " (Hybrid: \(workSiteFlexibility))"
-                } else if isRemote {
-                    location += " (Remote)"
+            var finalLocation = displayLocation
+            if isHybrid {
+                finalLocation += " (Hybrid: \(workSiteFlexibility))"
+            } else if isRemote {
+                finalLocation += " (Remote)"
+            }
+            
+            var cleanTitle = msJob.title
+            if msJob.title.contains(" - ") {
+                let parts = msJob.title.components(separatedBy: " - ")
+                if let lastPart = parts.last,
+                   (lastPart.contains(",") || parsedLocations.contains(where: { $0.city == lastPart || $0.state == lastPart })) {
+                    cleanTitle = parts.dropLast().joined(separator: " - ")
                 }
             }
             
-            return Job(
+            let job = Job(
                 id: "microsoft-\(msJob.jobId)",
                 title: cleanTitle,
-                location: location,
+                location: finalLocation,
                 postingDate: parseDate(msJob.postingDate),
                 url: "https://careers.microsoft.com/us/en/job/\(msJob.jobId)",
                 description: msJob.properties?.description ?? "",
@@ -218,7 +323,15 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
                 category: msJob.properties?.profession,
                 firstSeenDate: Date()
             )
+            
+            filteredJobs.append(job)
         }
+        
+        if filteredOutCount > 0 {
+            print("🔵 [Microsoft] Filtered out \(filteredOutCount) jobs from non-target countries")
+        }
+        
+        return filteredJobs
     }
     
     private func parseDate(_ dateString: String) -> Date? {

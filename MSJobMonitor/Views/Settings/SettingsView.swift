@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var enableMicrosoft = true
     @State private var enableTikTok = false
     @State private var enableApple = true
+    @State private var enableSnap = true
     @State private var enableCustomBoards = true
     @State private var includeRemoteJobs = true
     @State private var showSuccessMessage = false
@@ -50,7 +51,6 @@ struct SettingsView: View {
                                     Image(systemName: JobSource.tiktok.icon)
                                         .foregroundColor(JobSource.tiktok.color)
                                     Text("TikTok Jobs")
-//                                    Text("(Refreshes once an hour)")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
@@ -66,6 +66,16 @@ struct SettingsView: View {
                                 }
                             }
                             
+                            Toggle(isOn: $enableSnap) {
+                                HStack {
+                                    Image(systemName: JobSource.snap.icon)
+                                        .foregroundColor(JobSource.snap.color)
+                                    Text("Snap Inc. Careers")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
                             Toggle(isOn: $enableCustomBoards) {
                                 HStack {
                                     Image(systemName: "globe")
@@ -76,7 +86,7 @@ struct SettingsView: View {
                                 }
                             }
                             
-                            Text("TikTok checks hourly because no api")
+                            Text("Note: Some sources may have fixed refresh intervals")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -158,6 +168,9 @@ struct SettingsView: View {
                                 if jobManager.fetchStatistics.appleJobs > 0 {
                                     StatRow(label: "Apple", value: "\(jobManager.fetchStatistics.appleJobs)")
                                 }
+                                if jobManager.fetchStatistics.snapJobs > 0 {
+                                    StatRow(label: "Snap", value: "\(jobManager.fetchStatistics.snapJobs)")
+                                }
                                 if jobManager.fetchStatistics.customBoardJobs > 0 {
                                     StatRow(label: "Custom Boards", value: "\(jobManager.fetchStatistics.customBoardJobs)")
                                 }
@@ -215,6 +228,7 @@ struct SettingsView: View {
         enableMicrosoft = jobManager.enableMicrosoft
         enableTikTok = jobManager.enableTikTok
         enableApple = jobManager.enableApple
+        enableSnap = jobManager.enableSnap
         enableCustomBoards = jobManager.enableCustomBoards
         includeRemoteJobs = jobManager.includeRemoteJobs
     }
@@ -227,6 +241,7 @@ struct SettingsView: View {
         jobManager.enableMicrosoft = enableMicrosoft
         jobManager.enableTikTok = enableTikTok
         jobManager.enableApple = enableApple
+        jobManager.enableSnap = enableSnap
         jobManager.enableCustomBoards = enableCustomBoards
         jobManager.includeRemoteJobs = includeRemoteJobs
         

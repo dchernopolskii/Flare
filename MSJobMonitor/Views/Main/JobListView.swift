@@ -5,8 +5,52 @@
 //  Created by Dan Chernopolskii on 9/28/25.
 //
 
-
 import SwiftUI
+
+@propertyWrapper
+struct PersistedJobSources: DynamicProperty {
+    @State private var value: Set<JobSource>
+    let key: String
+    
+    var wrappedValue: Set<JobSource> {
+        get { value }
+        nonmutating set {
+            value = newValue
+            save()
+        }
+    }
+    
+    var projectedValue: Binding<Set<JobSource>> {
+        Binding(
+            get: { value },
+            set: { newValue in
+                value = newValue
+                save()
+            }
+        )
+    }
+    
+    init(wrappedValue: Set<JobSource> = Set(JobSource.allCases.filter { $0.isSupported }), key: String = "selectedJobSources") {
+        self.key = key
+        
+        if let data = UserDefaults.standard.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            let sources = decoded.compactMap { rawValue in
+                JobSource(rawValue: rawValue)
+            }
+            self._value = State(initialValue: Set(sources))
+        } else {
+            self._value = State(initialValue: wrappedValue)
+        }
+    }
+    
+    private func save() {
+        let rawValues = value.map { $0.rawValue }
+        if let encoded = try? JSONEncoder().encode(rawValues) {
+            UserDefaults.standard.set(encoded, forKey: key)
+        }
+    }
+}
 
 struct JobListView: View {
     @EnvironmentObject var jobManager: JobManager
@@ -14,10 +58,10 @@ struct JobListView: View {
     @Binding var sidebarVisible: Bool
     let isWindowMinimized: Bool
     
-    @State private var searchText = ""
-    @State private var selectedSources: Set<JobSource> = Set(JobSource.allCases.filter { $0.isSupported })
-    @State private var showOnlyNew = false
-    @State private var showOnlyApplied = false
+    @State private var searchText = UserDefaults.standard.string(forKey: "jobSearchText") ?? ""
+    @PersistedJobSources private var selectedSources
+    @State private var showOnlyNew = UserDefaults.standard.bool(forKey: "showOnlyNewJobs")
+    @State private var showOnlyApplied = UserDefaults.standard.bool(forKey: "showOnlyAppliedJobs")
 
     var filteredJobs: [Job] {
         var result = jobManager.jobs
@@ -38,7 +82,7 @@ struct JobListView: View {
         if showOnlyNew {
             result = result.filter { job in
                 if let postingDate = job.postingDate {
-                    return Date().timeIntervalSince(postingDate) < 7200
+                    return Date().timeIntervalSince(postingDate) < 7200 // 2 hours
                 } else {
                     return Date().timeIntervalSince(job.firstSeenDate) < 7200
                 }
@@ -81,10 +125,18 @@ struct JobListView: View {
                 }
             }
             
-            // Error Banner
             if let error = jobManager.lastError {
                 ErrorBanner(message: error)
             }
+        }
+        .onChange(of: searchText) { newValue in
+            UserDefaults.standard.set(newValue, forKey: "jobSearchText")
+        }
+        .onChange(of: showOnlyNew) { newValue in
+            UserDefaults.standard.set(newValue, forKey: "showOnlyNewJobs")
+        }
+        .onChange(of: showOnlyApplied) { newValue in
+            UserDefaults.standard.set(newValue, forKey: "showOnlyAppliedJobs")
         }
     }
 }
@@ -93,20 +145,23 @@ struct JobListHeader: View {
     @EnvironmentObject var jobManager: JobManager
     @EnvironmentObject var boardMonitor: JobBoardMonitor
     @Binding var searchText: String
-    @Binding var selectedSources: Set<JobSource> // UPDATED: Set instead of single source
+    @Binding var selectedSources: Set<JobSource>
     @Binding var showOnlyNew: Bool
     @Binding var showOnlyApplied: Bool
     
     private var supportedSources: [JobSource] {
-        JobSource.allCases.filter { $0.isSupported }
+        let jobSources = Set(jobManager.jobs.map { $0.source })
+        return Array(jobSources).sorted { $0.rawValue < $1.rawValue }
     }
     
     private var allSourcesSelected: Bool {
-        selectedSources.count == supportedSources.count
+        !supportedSources.isEmpty && supportedSources.allSatisfy { selectedSources.contains($0) }
     }
     
     private var someSourcesSelected: Bool {
-        !selectedSources.isEmpty && selectedSources.count < supportedSources.count
+        !selectedSources.isEmpty && selectedSources.contains { source in
+            supportedSources.contains(source)
+        }
     }
     
     var body: some View {
@@ -119,33 +174,41 @@ struct JobListHeader: View {
                 
                 Spacer()
                 
-                Menu {
-                    // All Sources toggle
-                    Button(action: toggleAllSources) {
-                        HStack {
-                            Image(systemName: allSourcesSelected ? "checkmark.square.fill" :
-                                                someSourcesSelected ? "minus.square.fill" : "square")
-                            Text("All Sources")
-                            Spacer()
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    ForEach(supportedSources, id: \.self) { source in
-                        Button(action: {
-                            toggleSource(source)
-                        }) {
+                if !supportedSources.isEmpty {
+                    Menu {
+                        Button(action: toggleAllSources) {
                             HStack {
-                                Image(systemName: selectedSources.contains(source) ? "checkmark.square.fill" : "square")
-                                Image(systemName: source.icon)
-                                Text(source.rawValue)
+                                Image(systemName: allSourcesSelected ? "checkmark.square.fill" :
+                                                    someSourcesSelected ? "minus.square.fill" : "square")
+                                Text("All Sources")
                                 Spacer()
                             }
                         }
+                        
+                        Divider()
+                        
+                        ForEach(supportedSources, id: \.self) { source in
+                            Button(action: {
+                                toggleSource(source)
+                            }) {
+                                HStack {
+                                    Image(systemName: selectedSources.contains(source) ? "checkmark.square.fill" : "square")
+                                    Image(systemName: source.icon)
+                                    Text(source.rawValue)
+                                    
+                                    let count = jobManager.jobs.filter { $0.source == source }.count
+                                    if count > 0 {
+                                        Text("(\(count))")
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    Spacer()
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(sourceFilterLabel, systemImage: "line.3.horizontal.decrease.circle")
                     }
-                } label: {
-                    Label(sourceFilterLabel, systemImage: "line.3.horizontal.decrease.circle")
                 }
                 
                 Button(action: {
@@ -199,6 +262,16 @@ struct JobListHeader: View {
                         .foregroundColor(showOnlyApplied ? .green : .secondary)
                 }
                 .toggleStyle(.button)
+                
+                // Show filter status
+                if !selectedSources.isEmpty && selectedSources.count < supportedSources.count {
+                    Text("Filtered")
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.2))
+                        .cornerRadius(4)
+                }
             }
             .padding(.horizontal)
             .padding(.bottom)
@@ -206,23 +279,26 @@ struct JobListHeader: View {
     }
     
     private var sourceFilterLabel: String {
-        if allSourcesSelected {
+        if supportedSources.isEmpty {
+            return "No Sources"
+        } else if allSourcesSelected {
             return "All Sources"
         } else if selectedSources.isEmpty {
-            return "No Sources"
+            return "No Sources Selected"
         } else if selectedSources.count == 1 {
             return selectedSources.first?.rawValue ?? "Unknown"
         } else {
-            return "\(selectedSources.count) Sources"
+            let activeCount = selectedSources.filter { source in
+                supportedSources.contains(source)
+            }.count
+            return "\(activeCount) Sources"
         }
     }
     
     private func toggleAllSources() {
         if allSourcesSelected {
-            // Uncheck all
             selectedSources.removeAll()
         } else {
-            // Check all
             selectedSources = Set(supportedSources)
         }
     }
@@ -235,110 +311,6 @@ struct JobListHeader: View {
         }
     }
 }
-
-//struct JobListViewWithPropertyWrapper: View {
-//    @EnvironmentObject var jobManager: JobManager
-//    @EnvironmentObject var boardMonitor: JobBoardMonitor
-//    @Binding var sidebarVisible: Bool
-//    let isWindowMinimized: Bool
-//    
-//    @State private var searchText = ""
-//    @State private var showOnlyNew = false
-//    @State private var showOnlyApplied = false
-//    
-//    @PersistedJobSources private var selectedSources
-//    
-//    var filteredJobs: [Job] {
-//        var result = jobManager.jobs
-//        
-//        // Filter by search text
-//        if !searchText.isEmpty {
-//            result = result.filter { job in
-//                job.title.localizedCaseInsensitiveContains(searchText) ||
-//                job.location.localizedCaseInsensitiveContains(searchText) ||
-//                job.companyName?.localizedCaseInsensitiveContains(searchText) ?? false ||
-//                job.department?.localizedCaseInsensitiveContains(searchText) ?? false
-//            }
-//        }
-//        
-//        if !selectedSources.isEmpty {
-//            result = result.filter { selectedSources.contains($0.source) }
-//        }
-//        
-//        if showOnlyNew {
-//            result = result.filter { job in
-//                if let postingDate = job.postingDate {
-//                    return Date().timeIntervalSince(postingDate) < 7200
-//                } else {
-//                    return Date().timeIntervalSince(job.firstSeenDate) < 7200
-//                }
-//            }
-//        }
-//        
-//        // Filter by applied status
-//        if showOnlyApplied {
-//            result = result.filter { jobManager.isJobApplied($0) }
-//        }
-//        
-//        return result
-//    }
-//    
-//    var body: some View {
-//        VStack(spacing: 0) {
-//            // Header
-//            JobListHeader(
-//                searchText: $searchText,
-//                selectedSources: $selectedSources,
-//                showOnlyNew: $showOnlyNew,
-//                showOnlyApplied: $showOnlyApplied
-//            )
-//            
-//            Divider()
-//            
-//            // Job List or Empty State
-//            if filteredJobs.isEmpty && !jobManager.isLoading {
-//                EmptyJobsView()
-//            } else {
-//                ScrollView {
-//                    LazyVStack(alignment: .leading, spacing: 0) {
-//                        ForEach(filteredJobs) { job in
-//                            JobRow(
-//                                job: job,
-//                                sidebarVisible: $sidebarVisible,
-//                                isWindowMinimized: isWindowMinimized
-//                            )
-//                            Divider()
-//                        }
-//                    }
-//                }
-//            }
-//            
-//            // Error Banner
-//            if let error = jobManager.lastError {
-//                ErrorBanner(message: error)
-//            }
-//        }
-//    }
-//}
-//
-//extension JobListView {
-//
-//    private func loadAllPersistedFilters() {
-//        searchText = UserDefaults.standard.string(forKey: "jobSearchText") ?? ""
-//        
-//        showOnlyNew = UserDefaults.standard.bool(forKey: "showOnlyNewJobs")
-//        showOnlyApplied = UserDefaults.standard.bool(forKey: "showOnlyAppliedJobs")
-//        
-//        loadPersistedSourceSelection()
-//    }
-//    
-//    private func saveAllFilters() {
-//        UserDefaults.standard.set(searchText, forKey: "jobSearchText")
-//        
-//        UserDefaults.standard.set(showOnlyNew, forKey: "showOnlyNewJobs")
-//        UserDefaults.standard.set(showOnlyApplied, forKey: "showOnlyAppliedJobs")
-//    }
-//}
 
 struct EmptyJobsView: View {
     @EnvironmentObject var jobManager: JobManager

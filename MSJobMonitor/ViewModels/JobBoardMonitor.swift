@@ -34,7 +34,6 @@ class JobBoardMonitor: ObservableObject {
         do {
             boardConfigs = try await persistenceService.loadBoardConfigs()
         } catch {
-            print("Failed to load board configs: \(error)")
         }
     }
     
@@ -42,7 +41,6 @@ class JobBoardMonitor: ObservableObject {
         do {
             try await persistenceService.saveBoardConfigs(boardConfigs)
         } catch {
-            print("Failed to save board configs: \(error)")
         }
     }
     
@@ -96,12 +94,10 @@ class JobBoardMonitor: ObservableObject {
             updatedConfig.lastFetched = Date()
             updateBoardConfig(updatedConfig)
             
-            print("✅ Test successful for \(config.displayName): \(jobs.count) jobs found")
             
         } catch {
             let message = "❌ Error: \(error.localizedDescription)"
             testResults[config.id] = message
-            print("❌ Test failed for \(config.displayName): \(error)")
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -124,7 +120,6 @@ class JobBoardMonitor: ObservableObject {
                 updateBoardConfig(updatedConfig)
                 
             } catch {
-                print("Error fetching from \(config.displayName): \(error)")
                 lastError = "Failed to fetch from \(config.displayName): \(error.localizedDescription)"
             }
             

@@ -41,7 +41,6 @@ actor GreenhouseFetcher: JobFetcherProtocol {
         let boardSlug = extractGreenhouseBoardSlug(from: url)
         
         let apiURL = URL(string: "https://boards-api.greenhouse.io/v1/boards/\(boardSlug)/jobs?content=true")!
-        print("🌱 [Greenhouse] Fetching API: \(apiURL)")
         
         var request = URLRequest(url: apiURL)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -55,9 +54,7 @@ actor GreenhouseFetcher: JobFetcherProtocol {
         }
         
         if httpResponse.statusCode != 200 {
-            print("🌱 [Greenhouse] HTTP Error: Status code \(httpResponse.statusCode)")
             if let errorString = String(data: data, encoding: .utf8) {
-                print("🌱 [Greenhouse] Error response: \(errorString.prefix(500))")
             }
             throw FetchError.httpError(httpResponse.statusCode)
         }
@@ -75,7 +72,6 @@ actor GreenhouseFetcher: JobFetcherProtocol {
             let titleKeywords = parseFilterString(titleFilter)
             let locationKeywords = parseFilterString(locationFilter)
             
-            print("🌱 [Greenhouse] Applying filters - Title keywords: \(titleKeywords), Location keywords: \(locationKeywords)")
             
             let jobs = decoded.jobs.compactMap { ghJob -> Job? in
                 var postingDate = Date()
@@ -94,7 +90,6 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                         title.localizedCaseInsensitiveContains(keyword)
                     }
                     if !titleMatches {
-                        print("🌱 [Greenhouse] Filtered out by title: '\(title)' doesn't match any of \(titleKeywords)")
                         return nil
                     }
                 }
@@ -105,7 +100,6 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                         location.localizedCaseInsensitiveContains(keyword)
                     }
                     if !locationMatches {
-                        print("🌱 [Greenhouse] Filtered out by location: '\(location)' doesn't match any of \(locationKeywords)")
                         return nil
                     }
                 }
@@ -128,11 +122,9 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                 )
             }
             
-            print("🌱 [Greenhouse] Parsed \(jobs.count) jobs from API (after filtering)")
             return jobs
             
         } catch {
-            print("🌱 [Greenhouse] JSON Parsing Error: \(error)")
             throw FetchError.parsingFailed
         }
     }

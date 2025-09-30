@@ -8,4 +8,14 @@ Current backlog: implement more ATS boards, address some performance issues, uni
 
 Compile in xcode and run. Bundled version may or may not be coming in the future. 
 
-<img width="1718" height="1051" alt="image" src="https://github.com/user-attachments/assets/140c18a2-7176-4889-b41e-23fc3465f7f8" />
+<p align="center">
+<img width="1722" height="1047" alt="image" src="https://github.com/user-attachments/assets/534c9e5c-5dab-4a6e-a742-d111f1d4ed44" />
+</p>
+
+<p align="center">
+<img width="722" height="602" alt="image" src="https://github.com/user-attachments/assets/a6da55a8-74ec-4b9b-8fab-8e8e1909f49f" />
+</p>
+
+<p align="center">
+<img width="1724" height="1047" alt="image" src="https://github.com/user-attachments/assets/01205f66-6c1f-40b6-bde5-19a6ac1356e1" />
+</p>

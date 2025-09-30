@@ -12,13 +12,11 @@ actor AppleFetcher: JobFetcherProtocol {
     private let locationURL = URL(string: "https://jobs.apple.com/api/v1/refData/postlocation")!
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int) async throws -> [Job] {
-        print("🍎 [Apple] Starting Apple job fetch...")
         
         var allJobs: [Job] = []
         let pageSize = 20
         
         let locationFilters = try await resolveMultipleLocations(location)
-        print("🍎 [Apple] Resolved locations: \(locationFilters)")
         
         let titleKeywords = titleKeywords.filter { !$0.isEmpty }
         
@@ -39,7 +37,6 @@ actor AppleFetcher: JobFetcherProtocol {
             )
             allJobs.append(contentsOf: jobs)
         } else {
-            print("🍎 [Apple] Multiple locations detected, using client-side filtering")
             let jobs = try await fetchJobsWithLocationFilters(
                 locationFilters: [],
                 titleKeywords: titleKeywords,
@@ -54,11 +51,9 @@ actor AppleFetcher: JobFetcherProtocol {
                 }
             }
             
-            print("🍎 [Apple] Client-side filtered \(jobs.count) -> \(filteredJobs.count) jobs")
             allJobs.append(contentsOf: filteredJobs)
         }
         
-        print("🍎 [Apple] Completed fetch: \(allJobs.count) jobs")
         return allJobs
     }
     
@@ -76,9 +71,7 @@ actor AppleFetcher: JobFetcherProtocol {
             
             if let locationId = try await resolveLocationId(location) {
                 resolvedIds.append(locationId)
-                print("🍎 [Apple] Resolved '\(location)' -> \(locationId)")
             } else {
-                print("🍎 [Apple] Could not resolve location: '\(location)'")
             }
             
             try await Task.sleep(nanoseconds: 200_000_000)
@@ -91,7 +84,6 @@ actor AppleFetcher: JobFetcherProtocol {
         var allJobs: [Job] = []
         
         for page in 0..<maxPages {
-            print("🍎 [Apple] Fetching page \(page + 1)...")
             
             let pageJobs = try await fetchJobsPage(
                 offset: page * pageSize,
@@ -101,14 +93,12 @@ actor AppleFetcher: JobFetcherProtocol {
             )
             
             if pageJobs.isEmpty {
-                print("🍎 [Apple] No more jobs, stopping at page \(page + 1)")
                 break
             }
             
             allJobs.append(contentsOf: pageJobs)
             
             if pageJobs.count < pageSize {
-                print("🍎 [Apple] Last page (\(pageJobs.count) jobs)")
                 break
             }
             
@@ -146,7 +136,6 @@ actor AppleFetcher: JobFetcherProtocol {
         
         if offset == 0 {
             if let debugBody = String(data: jsonData, encoding: .utf8) {
-                print("🍎 [Apple] Request body: \(debugBody)")
             }
         }
         
@@ -157,9 +146,7 @@ actor AppleFetcher: JobFetcherProtocol {
         }
         
         guard httpResponse.statusCode == 200 else {
-            print("🍎 [Apple] HTTP Error: \(httpResponse.statusCode)")
             if let errorString = String(data: data, encoding: .utf8) {
-                print("🍎 [Apple] Error response: \(errorString.prefix(500))")
             }
             throw FetchError.httpError(httpResponse.statusCode)
         }
@@ -173,7 +160,6 @@ actor AppleFetcher: JobFetcherProtocol {
         let jobs = searchResults.compactMap { convertAppleJob($0) }
         let filteredJobs = applyClientSideFiltering(jobs, titleKeywords: titleKeywords)
         
-        print("🍎 [Apple] Page returned \(searchResults.count) jobs, \(filteredJobs.count) after filtering")
         return filteredJobs
     }
     
@@ -227,7 +213,6 @@ actor AppleFetcher: JobFetcherProtocol {
         
         if offset == 0 {
             if let debugBody = String(data: jsonData, encoding: .utf8) {
-                print("🍎 [Apple] Request body: \(debugBody)")
             }
         }
         
@@ -238,9 +223,7 @@ actor AppleFetcher: JobFetcherProtocol {
         }
         
         guard httpResponse.statusCode == 200 else {
-            print("🍎 [Apple] HTTP Error: \(httpResponse.statusCode)")
             if let errorString = String(data: data, encoding: .utf8) {
-                print("🍎 [Apple] Error response: \(errorString.prefix(500))")
             }
             throw FetchError.httpError(httpResponse.statusCode)
         }
@@ -254,7 +237,6 @@ actor AppleFetcher: JobFetcherProtocol {
         let jobs = searchResults.compactMap { convertAppleJob($0) }
         let filteredJobs = applyClientSideFiltering(jobs, titleKeywords: titleKeywords)
         
-        print("🍎 [Apple] Page returned \(searchResults.count) jobs, \(filteredJobs.count) after filtering")
         return filteredJobs
     }
     
@@ -269,7 +251,6 @@ actor AppleFetcher: JobFetcherProtocol {
         let (data, response) = try await URLSession.shared.data(from: url)
         
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            print("🍎 [Apple] Location resolution failed for: \(locationQuery)")
             return nil
         }
         

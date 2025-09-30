@@ -29,7 +29,6 @@ actor LeverFetcher: JobFetcherProtocol {
         let titleKeywords = parseFilterString(titleFilter)
         let locationKeywords = parseFilterString(locationFilter)
         
-        print("🎚️ [Lever] Applying filters - Title keywords: \(titleKeywords), Location keywords: \(locationKeywords)")
         
         return decoded.compactMap { job -> Job? in
             let location = job.categories.location ?? "Location not specified"
@@ -41,7 +40,6 @@ actor LeverFetcher: JobFetcherProtocol {
                     title.localizedCaseInsensitiveContains(keyword)
                 }
                 if !titleMatches {
-                    print("🎚️ [Lever] Filtered out by title: '\(title)' doesn't match any of \(titleKeywords)")
                     return nil
                 }
             }
@@ -52,7 +50,6 @@ actor LeverFetcher: JobFetcherProtocol {
                     location.localizedCaseInsensitiveContains(keyword)
                 }
                 if !locationMatches {
-                    print("🎚️ [Lever] Filtered out by location: '\(location)' doesn't match any of \(locationKeywords)")
                     return nil
                 }
             }
