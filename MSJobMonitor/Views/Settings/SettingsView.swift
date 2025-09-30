@@ -16,7 +16,9 @@ struct SettingsView: View {
     @State private var maxPagesToFetch = 5.0
     @State private var enableMicrosoft = true
     @State private var enableTikTok = false
+    @State private var enableApple = true
     @State private var enableCustomBoards = true
+    @State private var includeRemoteJobs = true
     @State private var showSuccessMessage = false
     
     var body: some View {
@@ -30,7 +32,7 @@ struct SettingsView: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    // Data Sources Section
+                    // Data Sources
                     SettingsSection(title: "Data Sources") {
                         VStack(alignment: .leading, spacing: 12) {
                             Toggle(isOn: $enableMicrosoft) {
@@ -48,7 +50,17 @@ struct SettingsView: View {
                                     Image(systemName: JobSource.tiktok.icon)
                                         .foregroundColor(JobSource.tiktok.color)
                                     Text("TikTok Jobs")
-                                    Text("(Refreshes once an hour)")
+//                                    Text("(Refreshes once an hour)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            Toggle(isOn: $enableApple) {
+                                HStack {
+                                    Image(systemName: JobSource.apple.icon)
+                                        .foregroundColor(JobSource.apple.color)
+                                    Text("Apple Jobs")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
@@ -89,6 +101,16 @@ struct SettingsView: View {
                                 Text("Separate multiple locations with commas")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
+                            }
+                            Toggle(isOn: $includeRemoteJobs) {
+                                HStack {
+                                    Image(systemName: "house")
+                                        .foregroundColor(.blue)
+                                    Text("Include Remote Jobs")
+                                    Text("(automatically adds 'remote' to location searches)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
                             }
                         }
                     }
@@ -133,6 +155,9 @@ struct SettingsView: View {
                                 if jobManager.fetchStatistics.tiktokJobs > 0 {
                                     StatRow(label: "TikTok", value: "\(jobManager.fetchStatistics.tiktokJobs)")
                                 }
+                                if jobManager.fetchStatistics.appleJobs > 0 {
+                                    StatRow(label: "Apple", value: "\(jobManager.fetchStatistics.appleJobs)")
+                                }
                                 if jobManager.fetchStatistics.customBoardJobs > 0 {
                                     StatRow(label: "Custom Boards", value: "\(jobManager.fetchStatistics.customBoardJobs)")
                                 }
@@ -160,7 +185,6 @@ struct SettingsView: View {
                                 await jobManager.fetchAllJobs()
                             }
                         }
-                        
                         Spacer()
                         
                         if showSuccessMessage {
@@ -190,7 +214,9 @@ struct SettingsView: View {
         maxPagesToFetch = Double(jobManager.maxPagesToFetch)
         enableMicrosoft = jobManager.enableMicrosoft
         enableTikTok = jobManager.enableTikTok
+        enableApple = jobManager.enableApple
         enableCustomBoards = jobManager.enableCustomBoards
+        includeRemoteJobs = jobManager.includeRemoteJobs
     }
     
     private func saveSettings() {
@@ -200,7 +226,9 @@ struct SettingsView: View {
         jobManager.maxPagesToFetch = Int(maxPagesToFetch)
         jobManager.enableMicrosoft = enableMicrosoft
         jobManager.enableTikTok = enableTikTok
+        jobManager.enableApple = enableApple
         jobManager.enableCustomBoards = enableCustomBoards
+        jobManager.includeRemoteJobs = includeRemoteJobs
         
         Task {
             await jobManager.startMonitoring()

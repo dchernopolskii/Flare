@@ -52,9 +52,17 @@ class JobManager: ObservableObject {
     @Published var enableMicrosoft: Bool = UserDefaults.standard.bool(forKey: "enableMicrosoft") {
         didSet { UserDefaults.standard.set(enableMicrosoft, forKey: "enableMicrosoft") }
     }
+    
+    @Published var enableApple: Bool = UserDefaults.standard.object(forKey: "enableApple") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(enableApple, forKey: "enableApple") }
+    }
 
     @Published var enableCustomBoards: Bool = UserDefaults.standard.object(forKey: "enableCustomBoards") as? Bool ?? true {
         didSet { UserDefaults.standard.set(enableCustomBoards, forKey: "enableCustomBoards") }
+    }
+    
+    @Published var includeRemoteJobs: Bool = UserDefaults.standard.object(forKey: "includeRemoteJobs") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(includeRemoteJobs, forKey: "includeRemoteJobs") }
     }
     
     // MARK: - Private Properties
@@ -67,6 +75,7 @@ class JobManager: ObservableObject {
     // MARK: - Fetchers
     private let microsoftFetcher = MicrosoftJobFetcher()
     private let tiktokFetcher = TikTokJobFetcher()
+    private let appleFetcher = AppleFetcher()
     private let greenhouseFetcher = GreenhouseFetcher()
     
     private init() {
@@ -101,11 +110,21 @@ class JobManager: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+        
+        $enableApple
+            .sink { [weak self] enabled in
+                if enabled {
+                    self?.startMonitoringSource(.apple)
+                } else {
+                    self?.stopMonitoringSource(.apple)
+                }
+            }
+            .store(in: &cancellables)
     }
     
     // MARK: - Public Methods
     func startMonitoring() async {
-        print("📊 Starting job monitoring...")
+        print("Starting job monitoring...")
         
         // Initial fetch
         await fetchAllJobs()
@@ -116,6 +135,9 @@ class JobManager: ObservableObject {
         if enableTikTok {
             startMonitoringSource(.tiktok)
         }
+        if enableApple {
+            startMonitoringSource(.apple)
+        }
         if enableCustomBoards {
             await JobBoardMonitor.shared.startMonitoring()
         }
@@ -124,7 +146,7 @@ class JobManager: ObservableObject {
     func stopMonitoring() {
         fetchTimers.values.forEach { $0.invalidate() }
         fetchTimers.removeAll()
-        print("📊 Stopped all job monitoring")
+        print("Stopped all job monitoring")
     }
     
     func fetchAllJobs() async {
@@ -146,7 +168,7 @@ class JobManager: ObservableObject {
                 fetchStatistics.microsoftJobs = jobs.count
             } catch {
                 lastError = "Microsoft: \(error.localizedDescription)"
-                print("❌ Microsoft fetch error: \(error)")
+                print("Microsoft fetch error: \(error)")
             }
         }
         
@@ -159,7 +181,20 @@ class JobManager: ObservableObject {
                 fetchStatistics.tiktokJobs = jobs.count
             } catch {
                 lastError = "TikTok: \(error.localizedDescription)"
-                print("❌ TikTok fetch error: \(error)")
+                print("TikTok fetch error: \(error)")
+            }
+        }
+        
+        if enableApple {
+            do {
+                let jobs = try await fetchFromSource(.apple)
+                let newJobs = filterNewJobs(jobs)
+                allNewJobs.append(contentsOf: newJobs)
+                allFetchedJobs.append(contentsOf: jobs)
+                fetchStatistics.appleJobs = jobs.count
+            } catch {
+                lastError = "Apple: \(error.localizedDescription)"
+                print("Apple fetch error: \(error)")
             }
         }
         
@@ -225,13 +260,13 @@ class JobManager: ObservableObject {
             }
         }
         
-        print("⏰ Started monitoring \(source.rawValue) every \(refreshInterval) minutes")
+        print("Started monitoring \(source.rawValue) every \(refreshInterval) minutes")
     }
     
     private func stopMonitoringSource(_ source: JobSource) {
         fetchTimers[source]?.invalidate()
         fetchTimers.removeValue(forKey: source)
-        print("⏰ Stopped monitoring \(source.rawValue)")
+        print("Stopped monitoring \(source.rawValue)")
     }
     
     private func fetchFromSource(_ source: JobSource) async throws -> [Job] {
@@ -253,6 +288,12 @@ class JobManager: ObservableObject {
                 location: locationFilter,
                 maxPages: 350  // Fetch more pages for TikTok since no dates
             )
+        case .apple:
+             return try await appleFetcher.fetchJobs(
+                 titleKeywords: titleKeywords,
+                 location: locationFilter,
+                 maxPages: Int(maxPagesToFetch)
+             )
         case .greenhouse:
             return []
         default:
@@ -269,31 +310,26 @@ class JobManager: ObservableObject {
                 await processNewJobs(newJobs, allFetched: jobs)
             }
         } catch {
-            print("❌ Error fetching from \(source.rawValue): \(error)")
+            print("Error fetching from \(source.rawValue): \(error)")
         }
     }
     
     private func filterNewJobs(_ jobs: [Job]) -> [Job] {
-//        return jobs.filter { job in
-//            job.isRecent && !storedJobIds.contains(job.id)
         return jobs.filter { job in
-            job.isRecentOrCustomBoard && !storedJobIds.contains(job.id)
+            job.isRecent && !storedJobIds.contains(job.id)
         }
     }
     
     private func processNewJobs(_ newJobs: [Job], allFetched: [Job]) async {
-        // Add new job IDs to stored set
         newJobs.forEach { storedJobIds.insert($0.id) }
         
-//        let recentJobs = allFetched.filter { $0.isRecent }
-        let recentJobs = allFetched.filter { $0.isRecentOrCustomBoard }
+        let recentJobs = allFetched.filter { $0.isRecent }
         
         var uniqueJobs: [Job] = []
         var seenIds = Set<String>()
         
-        let allJobs = recentJobs + jobs
-        for job in allJobs.sorted(by: { 
-            // Sort by posting date if available, otherwise by first seen date
+        let allJobs = recentJobs
+        for job in allJobs.sorted(by: {
             let date1 = $0.postingDate ?? $0.firstSeenDate
             let date2 = $1.postingDate ?? $1.firstSeenDate
             return date1 > date2
@@ -327,9 +363,9 @@ class JobManager: ObservableObject {
             storedJobIds = try await persistenceService.loadStoredJobIds()
             appliedJobIds = try await persistenceService.loadAppliedJobIds()
             
-            print("📊 Loaded \(jobs.count) jobs, \(storedJobIds.count) tracked IDs")
+            print("ðŸ“Š Loaded \(jobs.count) jobs, \(storedJobIds.count) tracked IDs")
         } catch {
-            print("❌ Error loading stored data: \(error)")
+            print("Error loading stored data: \(error)")
         }
     }
     
@@ -343,10 +379,26 @@ class JobManager: ObservableObject {
     
     private func parseLocations() -> [String] {
         guard !locationFilter.isEmpty else { return [] }
-        return locationFilter
+        
+        var locations = locationFilter
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        
+        if includeRemoteJobs {
+            let remoteKeywords = ["remote", "work from home", "distributed", "anywhere"]
+            let hasRemoteKeyword = locations.contains { location in
+                remoteKeywords.contains { keyword in
+                    location.localizedCaseInsensitiveContains(keyword)
+                }
+            }
+            
+            if !hasRemoteKeyword {
+                locations.append("remote")
+            }
+        }
+        
+        return locations
     }
 }
 
@@ -356,6 +408,7 @@ struct FetchStatistics {
     var newJobs: Int = 0
     var microsoftJobs: Int = 0
     var tiktokJobs: Int = 0
+    var appleJobs: Int = 0
     var customBoardJobs: Int = 0
     var lastFetchTime: Date?
     
@@ -368,6 +421,9 @@ struct FetchStatistics {
         if tiktokJobs > 0 {
             parts.append("TikTok: \(tiktokJobs)")
         }
+        if appleJobs > 0 {
+            parts.append("Apple: \(appleJobs)")
+        }
         if customBoardJobs > 0 {
             parts.append("Boards: \(customBoardJobs)")
         }
@@ -376,6 +432,7 @@ struct FetchStatistics {
             return "No jobs found"
         }
         
-        return parts.joined(separator: " • ")
+        return parts.joined(separator: " ")
     }
 }
+

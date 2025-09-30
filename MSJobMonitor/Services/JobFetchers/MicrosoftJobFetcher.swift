@@ -12,7 +12,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
     private let baseURL = "https://gcsservices.careers.microsoft.com/search/api/v1/search"
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int = 5) async throws -> [Job] {
-        print("🔷 [Microsoft] Starting with titles: \(titleKeywords), location: '\(location)'")
+        print("ðŸ”· [Microsoft] Starting with titles: \(titleKeywords), location: '\(location)'")
         
         var allJobs: [Job] = []
         var globalSeenJobIds = Set<String>()
@@ -23,8 +23,8 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
         
         let titles = titleKeywords.filter { !$0.isEmpty }
         
-        print("🔷 [Microsoft] Parsed titles: \(titles)")
-        print("🔷 [Microsoft] Parsed locations: \(locations)")
+        print("ðŸ”· [Microsoft] Parsed titles: \(titles)")
+        print("ðŸ”· [Microsoft] Parsed locations: \(locations)")
         
         var searchCombinations: [(title: String, location: String)] = []
         
@@ -46,7 +46,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             }
         }
         
-        print("🔷 [Microsoft] Will make \(searchCombinations.count) separate API calls")
+        print("ðŸ”· [Microsoft] Will make \(searchCombinations.count) separate API calls")
         
         for (index, combo) in searchCombinations.enumerated() {
             let description = [combo.title, combo.location].filter { !$0.isEmpty }.joined(separator: " in ")
@@ -70,7 +70,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             }
             
             allJobs.append(contentsOf: newJobs)
-            print("🔷 [Microsoft] Search \(index + 1) returned \(newJobs.count) new unique jobs")
+            print("ðŸ”· [Microsoft] Search \(index + 1) returned \(newJobs.count) new unique jobs")
             
             try await Task.sleep(nanoseconds: 700_000_000) // 0.7 seconds
         }
@@ -79,7 +79,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             JobManager.shared.loadingProgress = ""
         }
         
-        print("🔷 [Microsoft] TOTAL RESULT: \(allJobs.count) unique jobs from \(searchCombinations.count) searches")
+        print("ðŸ”· [Microsoft] TOTAL RESULT: \(allJobs.count) unique jobs from \(searchCombinations.count) searches")
         return allJobs
     }
     
@@ -104,7 +104,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
                 components.queryItems?.append(URLQueryItem(name: "q", value: queryString))
             }
             
-            print("🔷 [Microsoft] API call with query: '\(queryString)' (page \(page))")
+            print("ðŸ”· [Microsoft] API call with query: '\(queryString)' (page \(page))")
             
             var request = URLRequest(url: components.url!)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -114,7 +114,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                print("🔷 [Microsoft] API error for query: '\(queryString)'")
+                print("ðŸ”· [Microsoft] API error for query: '\(queryString)'")
                 break
             }
             

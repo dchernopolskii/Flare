@@ -35,20 +35,6 @@ struct Job: Identifiable, Codable, Equatable {
         let hoursSinceFirstSeen = Date().timeIntervalSince(firstSeenDate) / 3600
         return hoursSinceFirstSeen <= 24 && hoursSinceFirstSeen >= 0
     }
-    // DEBUG
-    var isRecentOrCustomBoard: Bool {
-        if source == .microsoft || source == .tiktok {
-            return isRecent
-        }
-        
-        if let postingDate = postingDate {
-            let hoursSincePosting = Date().timeIntervalSince(postingDate) / 3600
-            return hoursSincePosting <= 168 // 7 days instead of 24 hours
-        }
-        
-        let hoursSinceFirstSeen = Date().timeIntervalSince(firstSeenDate) / 3600
-        return hoursSinceFirstSeen <= 24
-    }
     
     var cleanDescription: String {
         HTMLCleaner.cleanHTML(description)
@@ -96,6 +82,8 @@ struct Job: Identifiable, Codable, Equatable {
         case .greenhouse, .workable, .jobvite, .lever, .bamboohr, 
              .smartrecruiters, .ashby, .jazzhr, .recruitee, .breezyhr:
             return "Apply on Company Website"
+        case .apple:
+            return "Apply on Apple Careers"
         }
     }
 }
@@ -104,6 +92,7 @@ struct Job: Identifiable, Codable, Equatable {
 enum JobSource: String, Codable, CaseIterable {
     case microsoft = "Microsoft"
     case tiktok = "TikTok"
+    case apple = "Apple"
     case greenhouse = "Greenhouse"
     case workable = "Workable"
     case jobvite = "Jobvite"
@@ -119,6 +108,7 @@ enum JobSource: String, Codable, CaseIterable {
         switch self {
         case .microsoft: return "building.2.fill"
         case .tiktok: return "music.note.tv.fill"
+        case .apple: return "applelogo"
         case .greenhouse: return "leaf.fill"
         case .workable: return "briefcase.circle.fill"
         case .jobvite: return "person.3.fill"
@@ -136,6 +126,7 @@ enum JobSource: String, Codable, CaseIterable {
         switch self {
         case .microsoft: return .blue
         case .tiktok: return .pink
+        case .apple: return .black
         case .greenhouse: return .green
         case .workable: return .purple
         case .jobvite: return .orange
@@ -156,6 +147,8 @@ enum JobSource: String, Codable, CaseIterable {
             return .microsoft
         } else if lowercased.contains("lifeattiktok.com") || lowercased.contains("tiktok.com") {
             return .tiktok
+        } else if lowercased.contains("jobs.apple.com") {
+            return .apple
         } else if lowercased.contains("greenhouse.io") {
             return .greenhouse
         } else if lowercased.contains("workable.com") {
@@ -316,7 +309,7 @@ class QualificationExtractor {
 extension JobSource {
     var isSupported: Bool {
         switch self {
-        case .microsoft, .tiktok, .greenhouse, .ashby, .lever:
+        case .microsoft, .tiktok, .greenhouse, .ashby, .lever, .apple:
             return true
         default:
             return false

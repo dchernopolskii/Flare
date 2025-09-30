@@ -76,13 +76,28 @@ actor LeverFetcher: JobFetcherProtocol {
     
     // MARK: - Helper Methods
     
-    private func parseFilterString(_ filterString: String) -> [String] {
+    private func parseFilterString(_ filterString: String, includeRemote: Bool = true) -> [String] {
         guard !filterString.isEmpty else { return [] }
         
-        return filterString
+        var keywords = filterString
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        
+        if includeRemote {
+            let remoteKeywords = ["remote", "work from home", "distributed", "anywhere"]
+            let hasRemoteKeyword = keywords.contains { keyword in
+                remoteKeywords.contains { remote in
+                    keyword.localizedCaseInsensitiveContains(remote)
+                }
+            }
+            
+            if !hasRemoteKeyword {
+                keywords.append("remote")
+            }
+        }
+        
+        return keywords
     }
     
     private func extractLeverSlug(from url: URL) -> String {

@@ -25,7 +25,6 @@ actor AshbyFetcher: JobFetcherProtocol {
         
         let decoded = try JSONDecoder().decode(AshbyResponse.self, from: data)
         
-        // Parse comma-separated filters
         let titleKeywords = parseFilterString(titleFilter)
         let locationKeywords = parseFilterString(locationFilter)
         
@@ -35,7 +34,6 @@ actor AshbyFetcher: JobFetcherProtocol {
             let location = job.location ?? "Location not specified"
             let title = job.title
             
-            // Apply title filter (OR logic - match any keyword)
             if !titleKeywords.isEmpty {
                 let titleMatches = titleKeywords.contains { keyword in
                     title.localizedCaseInsensitiveContains(keyword)
@@ -46,7 +44,6 @@ actor AshbyFetcher: JobFetcherProtocol {
                 }
             }
             
-            // Apply location filter (OR logic - match any keyword)
             if !locationKeywords.isEmpty {
                 let locationMatches = locationKeywords.contains { keyword in
                     location.localizedCaseInsensitiveContains(keyword)
@@ -76,13 +73,28 @@ actor AshbyFetcher: JobFetcherProtocol {
     
     // MARK: - Helper Methods
     
-    private func parseFilterString(_ filterString: String) -> [String] {
+    private func parseFilterString(_ filterString: String, includeRemote: Bool = true) -> [String] {
         guard !filterString.isEmpty else { return [] }
         
-        return filterString
+        var keywords = filterString
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        
+        if includeRemote {
+            let remoteKeywords = ["remote", "work from home", "distributed", "anywhere"]
+            let hasRemoteKeyword = keywords.contains { keyword in
+                remoteKeywords.contains { remote in
+                    keyword.localizedCaseInsensitiveContains(remote)
+                }
+            }
+            
+            if !hasRemoteKeyword {
+                keywords.append("remote")
+            }
+        }
+        
+        return keywords
     }
     
     private func extractAshbySlug(from url: URL) -> String {

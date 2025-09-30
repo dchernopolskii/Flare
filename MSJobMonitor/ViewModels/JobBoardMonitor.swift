@@ -89,7 +89,7 @@ class JobBoardMonitor: ObservableObject {
         
         do {
             let jobs = try await fetchJobsFromBoard(config, titleFilter: "", locationFilter: "")
-            let message = "✅ Successfully fetched \(jobs.count) jobs"
+            let message = "✅ Found \(jobs.count) jobs"
             testResults[config.id] = message
             
             var updatedConfig = config
@@ -98,20 +98,13 @@ class JobBoardMonitor: ObservableObject {
             
             print("✅ Test successful for \(config.displayName): \(jobs.count) jobs found")
             
-            if !jobs.isEmpty {
-                print("📋 Sample jobs from \(config.displayName):")
-                for job in jobs.prefix(3) {
-                    print("  - \(job.title) | \(job.location)")
-                }
-            }
-            
         } catch {
             let message = "❌ Error: \(error.localizedDescription)"
             testResults[config.id] = message
             print("❌ Test failed for \(config.displayName): \(error)")
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             self.testResults.removeValue(forKey: config.id)
         }
     }
