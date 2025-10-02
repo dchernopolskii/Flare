@@ -81,7 +81,15 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                                ?? Date()
                 }
                 
-                let location = ghJob.location?.name ?? "Location not specified"
+                let parsed = ParsedLocation(from: ghJob.location?.name ?? "")
+                let targetCountries = LocationService.extractTargetCountries(from: locationFilter)
+
+                // Skip jobs outside desired country set
+                if !targetCountries.contains(parsed.country) {
+                    return nil
+                }
+
+                let location = parsed.displayString + (parsed.isRemote ? " (Remote)" : "")
                 let title = ghJob.title
                 
                 // Apply title filter (OR logic - match any keyword)

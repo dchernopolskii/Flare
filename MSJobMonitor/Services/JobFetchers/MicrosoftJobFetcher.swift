@@ -10,53 +10,10 @@ import Foundation
 actor MicrosoftJobFetcher: JobFetcherProtocol {
     private let baseURL = "https://gcsservices.careers.microsoft.com/search/api/v1/search"
     
-    struct ParsedLocation {
-        let city: String
-        let state: String
-        let country: String
-        let isMultiple: Bool
-        let isRemote: Bool
-        
-        init(from location: String) {
-            let parts = location.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            
-            if parts.count >= 3 {
-                self.country = parts.last ?? ""
-                self.state = parts.count > 2 ? parts[parts.count - 2] : ""
-                self.city = parts.count > 2 ? parts[parts.count - 3] : ""
-                self.isMultiple = city.contains("Multiple Locations")
-            } else if parts.count == 2 {
-                self.country = parts.last ?? ""
-                self.state = parts.first ?? ""
-                self.city = ""
-                self.isMultiple = false
-            } else {
-                self.country = location
-                self.state = ""
-                self.city = ""
-                self.isMultiple = false
-            }
-            
-            self.isRemote = location.lowercased().contains("remote")
-        }
-        
-        var displayString: String {
-            if isMultiple {
-                return "Multiple Locations, \(country)"
-            } else if !city.isEmpty && !state.isEmpty {
-                return "\(city), \(state)"
-            } else if !state.isEmpty {
-                return state
-            } else {
-                return country
-            }
-        }
-    }
-    
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int = 5) async throws -> [Job] {
         print("🔵 [Microsoft] Starting fetch with location: '\(location)'")
         
-        let targetCountries = extractTargetCountries(from: location)
+        let targetCountries = LocationService.extractTargetCountries(from: location)
         print("🔵 [Microsoft] Target countries: \(targetCountries)")
         
         var allJobs: [Job] = []
@@ -122,84 +79,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
         print("🔵 [Microsoft] Total jobs returned: \(allJobs.count)")
         return allJobs
     }
-    
-    private func extractTargetCountries(from locationFilter: String) -> Set<String> {
-        guard !locationFilter.isEmpty else {
-            return ["United States", "Canada"]
-        }
         
-        let filterLower = locationFilter.lowercased()
-        var countries = Set<String>()
-        
-        let countryMappings: [String: String] = [
-            // US
-            "seattle": "United States",
-            "redmond": "United States",
-            "bellevue": "United States",
-            "san francisco": "United States",
-            "sf": "United States",
-            "bay area": "United States",
-            "mountain view": "United States",
-            "sunnyvale": "United States",
-            "san jose": "United States",
-            "los angeles": "United States",
-            "la": "United States",
-            "new york": "United States",
-            "nyc": "United States",
-            "boston": "United States",
-            "austin": "United States",
-            "chicago": "United States",
-            "atlanta": "United States",
-            "usa": "United States",
-            "united states": "United States",
-            "us": "United States",
-            
-            // Canada
-            "toronto": "Canada",
-            "vancouver": "Canada",
-            "montreal": "Canada",
-            "ottawa": "Canada",
-            "canada": "Canada",
-            
-            // UK
-            "london": "United Kingdom",
-            "manchester": "United Kingdom",
-            "uk": "United Kingdom",
-            "united kingdom": "United Kingdom",
-            
-            // Ireland
-            "dublin": "Ireland",
-            "cork": "Ireland",
-            "ireland": "Ireland",
-            
-            // Australia
-            "sydney": "Australia",
-            "melbourne": "Australia",
-            "australia": "Australia",
-            
-            // India
-            "bangalore": "India",
-            "bengaluru": "India",
-            "hyderabad": "India",
-            "pune": "India",
-            "delhi": "India",
-            "mumbai": "India",
-            "india": "India"
-        ]
-        
-        for (keyword, country) in countryMappings {
-            if filterLower.contains(keyword) {
-                countries.insert(country)
-            }
-        }
-        
-        if countries.isEmpty {
-            countries.insert("United States")
-        }
-        
-        return countries
-    }
-    
     private func executeIndividualSearch(title: String, location: String, targetCountries: Set<String>, maxPages: Int) async throws -> [Job] {
         var jobs: [Job] = []
         let pageLimit = min(maxPages, 3)
