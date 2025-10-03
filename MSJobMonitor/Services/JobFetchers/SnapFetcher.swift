@@ -16,7 +16,6 @@ actor SnapFetcher: JobFetcherProtocol {
     }
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int) async throws -> [Job] {
-        print("👻 [Snap] Starting Snap job fetch...")
         
         let trackingData = await loadJobTrackingData()
         let currentDate = Date()
@@ -59,9 +58,7 @@ actor SnapFetcher: JobFetcherProtocol {
         }
         
         guard httpResponse.statusCode == 200 else {
-            print("👻 [Snap] HTTP Error: \(httpResponse.statusCode)")
             if let errorString = String(data: data, encoding: .utf8) {
-                print("👻 [Snap] Error response: \(errorString.prefix(500))")
             }
             throw FetchError.httpError(httpResponse.statusCode)
         }
@@ -214,10 +211,8 @@ actor SnapFetcher: JobFetcherProtocol {
                 dict[item.id] = item.firstSeenDate
             }
             
-            print("👻 [Snap] Loaded tracking data for \(dict.count) jobs")
             return dict
         } catch {
-            print("👻 [Snap] No tracking data found: \(error.localizedDescription)")
             return [:]
         }
     }
@@ -245,9 +240,7 @@ actor SnapFetcher: JobFetcherProtocol {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url)
             
-            print("👻 [Snap] Saved tracking data for \(recentData.count) jobs")
         } catch {
-            print("❌ [Snap] Failed saving tracking data: \(error)")
         }
     }
 }

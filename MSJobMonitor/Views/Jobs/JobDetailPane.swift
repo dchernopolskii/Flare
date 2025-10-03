@@ -22,12 +22,10 @@ struct JobDetailPane: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Job Info Section
                     JobInfoSection(job: job)
                     
                     Divider()
                     
-                    // Section Picker (if multiple sections available)
                     if job.requiredQualifications != nil || job.preferredQualifications != nil {
                         JobDetailSectionPicker(
                             selectedSection: $selectedSection,
@@ -36,12 +34,10 @@ struct JobDetailPane: View {
                         )
                     }
                     
-                    // Job Content
                     JobDetailContent(job: job, selectedSection: selectedSection)
                     
                     Spacer(minLength: 20)
                     
-                    // Action Buttons
                     JobDetailActions(job: job)
                 }
                 .padding()

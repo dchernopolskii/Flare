@@ -34,11 +34,17 @@ struct PersistedJobSources: DynamicProperty {
         self.key = key
         
         if let data = UserDefaults.standard.data(forKey: key),
-           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+           let decoded = try? JSONDecoder().decode([String].self, from: data),
+           !decoded.isEmpty {
             let sources = decoded.compactMap { rawValue in
                 JobSource(rawValue: rawValue)
+            }.filter { $0.isSupported }
+            
+            if !sources.isEmpty {
+                self._value = State(initialValue: Set(sources))
+            } else {
+                self._value = State(initialValue: wrappedValue)
             }
-            self._value = State(initialValue: Set(sources))
         } else {
             self._value = State(initialValue: wrappedValue)
         }
@@ -82,7 +88,8 @@ struct JobListView: View {
         if showOnlyNew {
             result = result.filter { job in
                 if let postingDate = job.postingDate {
-                    return Date().timeIntervalSince(postingDate) < 7200 // 2 hours
+                    return Date().timeIntervalSince(postingDate) < 7200            let locationKeywords = parseFilterString(locationFilter)
+
                 } else {
                     return Date().timeIntervalSince(job.firstSeenDate) < 7200
                 }

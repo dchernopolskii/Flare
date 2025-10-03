@@ -66,12 +66,12 @@ class JobManager: ObservableObject {
         didSet { UserDefaults.standard.set(enableMicrosoft, forKey: "enableMicrosoft") }
     }
     
-    @Published var enableApple: Bool = UserDefaults.standard.object(forKey: "enableApple") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(enableApple, forKey: "enableApple") }
-    }
-    
     @Published var enableSnap: Bool = UserDefaults.standard.bool(forKey: "enableSnap") {
         didSet { UserDefaults.standard.set(enableSnap, forKey: "enableSnap") }
+    }
+    
+    @Published var enableAMD: Bool = UserDefaults.standard.bool(forKey: "enableAMD") {
+        didSet { UserDefaults.standard.set(enableAMD, forKey: "enableAMD") }
     }
 
     @Published var enableCustomBoards: Bool = UserDefaults.standard.object(forKey: "enableCustomBoards") as? Bool ?? true {
@@ -89,17 +89,19 @@ class JobManager: ObservableObject {
     private let notificationService = NotificationService.shared
     private var cancellables = Set<AnyCancellable>()
     private var jobsBySource: [JobSource: [Job]] = [:]
+    private var wakeObserver: NSObjectProtocol?
     
     // MARK: - Fetchers
     private let microsoftFetcher = MicrosoftJobFetcher()
     private let tiktokFetcher = TikTokJobFetcher()
-    private let appleFetcher = AppleFetcher()
     private let snapFetcher = SnapFetcher()
+    private let amdFetcher = AMDFetcher()
     private let greenhouseFetcher = GreenhouseFetcher()
     
     private init() {
         setupInitialState()
         setupBindings()
+        setupWakeNotification()
     }
     
     // MARK: - Setup
@@ -130,16 +132,6 @@ class JobManager: ObservableObject {
             }
             .store(in: &cancellables)
         
-        $enableApple
-            .sink { [weak self] enabled in
-                if enabled {
-                    self?.startMonitoringSource(.apple)
-                } else {
-                    self?.stopMonitoringSource(.apple)
-                }
-            }
-            .store(in: &cancellables)
-        
         $enableSnap
             .sink { [weak self] enabled in
                 if enabled {
@@ -163,11 +155,11 @@ class JobManager: ObservableObject {
         if enableTikTok {
             startMonitoringSource(.tiktok)
         }
-        if enableApple {
-            startMonitoringSource(.apple)
-        }
         if enableSnap {
             startMonitoringSource(.snap)
+        }
+        if enableAMD {
+            startMonitoringSource(.amd)
         }
         if enableCustomBoards {
             await JobBoardMonitor.shared.startMonitoring()
@@ -188,7 +180,6 @@ class JobManager: ObservableObject {
         var allNewJobs: [Job] = []
         var sourceJobsMap: [JobSource: [Job]] = [:]
         
-        // Fetch from each enabled source
         if enableMicrosoft {
             do {
                 let jobs = try await fetchFromSource(.microsoft)
@@ -198,7 +189,6 @@ class JobManager: ObservableObject {
                 fetchStatistics.microsoftJobs = jobs.count
             } catch {
                 lastError = "Microsoft: \(error.localizedDescription)"
-                // Keep existing Microsoft jobs if fetch fails
                 if let existingJobs = jobsBySource[.microsoft] {
                     sourceJobsMap[.microsoft] = existingJobs
                 }
@@ -224,31 +214,12 @@ class JobManager: ObservableObject {
             sourceJobsMap[.tiktok] = []
         }
         
-        if enableApple {
-            do {
-                let jobs = try await fetchFromSource(.apple)
-                sourceJobsMap[.apple] = jobs
-                let newJobs = filterNewJobs(jobs)
-                allNewJobs.append(contentsOf: newJobs)
-                fetchStatistics.appleJobs = jobs.count
-            } catch {
-                lastError = "Apple: \(error.localizedDescription)"
-                // Keep existing Apple jobs if fetch fails
-                if let existingJobs = jobsBySource[.apple] {
-                    sourceJobsMap[.apple] = existingJobs
-                }
-            }
-        } else {
-            sourceJobsMap[.apple] = []
-        }
-        
         if enableSnap {
             do {
                 let jobs = try await fetchFromSource(.snap)
                 sourceJobsMap[.snap] = jobs
                 let newJobs = filterNewJobs(jobs)
                 allNewJobs.append(contentsOf: newJobs)
-                fetchStatistics.appleJobs = jobs.count
             } catch {
                 lastError = "Snap: \(error.localizedDescription)"
                 if let existingJobs = jobsBySource[.snap] {
@@ -257,6 +228,23 @@ class JobManager: ObservableObject {
             }
         } else {
             sourceJobsMap[.snap] = []
+        }
+        
+        if enableAMD {
+            do {
+                let jobs = try await fetchFromSource(.amd)
+                sourceJobsMap[.snap] = jobs
+                let newJobs = filterNewJobs(jobs)
+                allNewJobs.append(contentsOf: newJobs)
+                fetchStatistics.amdJobs = jobs.count
+            } catch {
+                lastError = "AMD: \(error.localizedDescription)"
+                if let existingJobs = jobsBySource[.snap] {
+                    sourceJobsMap[.amd] = existingJobs
+                }
+            }
+        } else {
+            sourceJobsMap[.amd] = []
         }
         
         if enableCustomBoards {
@@ -333,6 +321,21 @@ class JobManager: ObservableObject {
         fetchTimers.removeValue(forKey: source)
     }
     
+    private func setupWakeNotification() {
+        // Listen for Mac wake events
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            print("💤 Mac woke up - triggering job refresh")
+            Task {
+                await self.fetchAllJobs()
+            }
+        }
+    }
+    
     private func fetchFromSource(_ source: JobSource) async throws -> [Job] {
         let titleKeywords = parseTitleKeywords()
         
@@ -351,14 +354,14 @@ class JobManager: ObservableObject {
                 location: locationFilter,
                 maxPages: 350  // Fetch more pages for TikTok since no dates
             )
-        case .apple:
-             return try await appleFetcher.fetchJobs(
+        case .snap:
+             return try await snapFetcher.fetchJobs(
                  titleKeywords: titleKeywords,
                  location: locationFilter,
                  maxPages: Int(maxPagesToFetch)
              )
-        case .snap:
-             return try await snapFetcher.fetchJobs(
+        case .amd:
+             return try await amdFetcher.fetchJobs(
                  titleKeywords: titleKeywords,
                  location: locationFilter,
                  maxPages: Int(maxPagesToFetch)
@@ -479,8 +482,8 @@ struct FetchStatistics {
     var newJobs: Int = 0
     var microsoftJobs: Int = 0
     var tiktokJobs: Int = 0
-    var appleJobs: Int = 0
     var snapJobs: Int = 0
+    var amdJobs: Int = 0
     var customBoardJobs: Int = 0
     var lastFetchTime: Date?
     
@@ -493,11 +496,11 @@ struct FetchStatistics {
         if tiktokJobs > 0 {
             parts.append("TikTok: \(tiktokJobs)")
         }
-        if appleJobs > 0 {
-            parts.append("Apple: \(appleJobs)")
-        }
         if snapJobs > 0 {
-            parts.append("Apple: \(appleJobs)")
+            parts.append("Snap: \(snapJobs)")
+        }
+        if amdJobs > 0 {
+            parts.append("AMD: \(amdJobs)")
         }
         if customBoardJobs > 0 {
             parts.append("Boards: \(customBoardJobs)")

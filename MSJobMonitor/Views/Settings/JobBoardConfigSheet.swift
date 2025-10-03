@@ -18,7 +18,6 @@ struct JobBoardConfigSheet: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             SheetHeader(title: "Configure Job Boards") {
                 dismiss()
             }
@@ -27,19 +26,16 @@ struct JobBoardConfigSheet: View {
             
             ScrollView {
                 VStack(spacing: 20) {
-                    // Add New Board Section
                     AddBoardSection(
                         newBoardName: $newBoardName,
                         newBoardURL: $newBoardURL,
                         testingBoardId: $testingBoardId
                     )
                     
-                    // Configured Boards List
                     if !monitor.boardConfigs.isEmpty {
                         ConfiguredBoardsList(testingBoardId: $testingBoardId)
                     }
                     
-                    // Supported Platforms Info
                     SupportedPlatformsInfo()
                 }
                 .padding()
@@ -96,11 +92,9 @@ struct AddBoardSection: View {
             Label("Add Job Board", systemImage: "plus.circle.fill")
                 .font(.headline)
             
-            // Name Field
             TextField("Board Name (e.g., GitLab, Stripe)", text: $newBoardName)
                 .textFieldStyle(.roundedBorder)
             
-            // URL Field with Detection
             VStack(alignment: .leading, spacing: 4) {
                 TextField("Board URL (job listing page)", text: $newBoardURL)
                     .textFieldStyle(.roundedBorder)
@@ -110,8 +104,7 @@ struct AddBoardSection: View {
                 }
             }
             
-            // Helper Text
-            Text("Currently supported: Greenhouse • Coming soon: Workable, Lever, Jobvite, and more")
+            Text("Currently supported: Greenhouse, Ashbyhq • Coming soon: Workable, Lever, Jobvite, and more")
                 .font(.caption)
                 .foregroundColor(.secondary)
             
@@ -122,19 +115,17 @@ struct AddBoardSection: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!isValidBoard || testingBoardId != nil)
                 
-                // Show loading state
                 if testingBoardId != nil {
                     HStack {
                         ProgressView()
                             .scaleEffect(0.8)
-                        Text("Testing board...")
+                        Text("Testing the board...")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
             }
             
-            // Show test results more prominently
             if !monitor.testResults.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Recent Test Results", systemImage: "checkmark.circle")
@@ -175,7 +166,6 @@ struct AddBoardSection: View {
         
         monitor.addBoardConfig(config)
         
-        // Always test the board when adding it
         testingBoardId = config.id
         Task {
             await monitor.testSingleBoard(config)
@@ -184,7 +174,6 @@ struct AddBoardSection: View {
             }
         }
         
-        // Clear fields
         newBoardName = ""
         newBoardURL = ""
     }
@@ -281,7 +270,6 @@ struct BoardConfigRow: View {
                             .foregroundColor(.secondary)
                     }
                     
-                    // Test result
                     if let testResult = monitor.testResults[config.id] {
                         HStack {
                             if testResult == "Testing..." {

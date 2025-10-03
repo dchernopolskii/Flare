@@ -25,7 +25,6 @@ actor LeverFetcher: JobFetcherProtocol {
         
         let decoded = try JSONDecoder().decode([LeverJob].self, from: data)
         
-        // Parse comma-separated filters
         let titleKeywords = parseFilterString(titleFilter)
         let locationKeywords = parseFilterString(locationFilter)
         
@@ -34,7 +33,6 @@ actor LeverFetcher: JobFetcherProtocol {
             let location = job.categories.location ?? "Location not specified"
             let title = job.text
             
-            // Apply title filter (OR logic - match any keyword)
             if !titleKeywords.isEmpty {
                 let titleMatches = titleKeywords.contains { keyword in
                     title.localizedCaseInsensitiveContains(keyword)
@@ -44,7 +42,6 @@ actor LeverFetcher: JobFetcherProtocol {
                 }
             }
             
-            // Apply location filter (OR logic - match any keyword)
             if !locationKeywords.isEmpty {
                 let locationMatches = locationKeywords.contains { keyword in
                     location.localizedCaseInsensitiveContains(keyword)

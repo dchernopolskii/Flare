@@ -14,6 +14,10 @@ actor TikTokJobFetcher: JobFetcherProtocol {
     private let maxJobs = 3500
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int) async throws -> [Job] {
+        print("🎵 [TikTok] Starting TikTok job fetch...")
+        print("🎵 [TikTok] Title keywords: \(titleKeywords)")
+        print("🎵 [TikTok] Location: \(location)")
+        print("🎵 [TikTok] Max pages: \(maxPages)")
         
         var allJobs: [Job] = []
         var currentOffset = 0
@@ -22,17 +26,21 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         let currentDate = Date()
         
         while allJobs.count < maxJobs && pageNumber <= maxPages {
+            print("🎵 [TikTok] Fetching page \(pageNumber) (offset: \(currentOffset))...")
             
             do {
                 let pageJobs = try await fetchJobsPage(
-                    titleKeywords: titleKeywords,
-                    location: location,
+                    titleKeywords: [],
+                    location: "",
                     offset: currentOffset
                 )
                 
                 if pageJobs.isEmpty {
+                    print("🎵 [TikTok] No more jobs at page \(pageNumber)")
                     break
                 }
+                
+                print("🎵 [TikTok] Received \(pageJobs.count) jobs from API")
                 
                 let converted = pageJobs.compactMap { tikTokJob -> Job? in
                     let locationString = buildLocationString(from: tikTokJob.city_info)
@@ -58,14 +66,17 @@ actor TikTokJobFetcher: JobFetcherProtocol {
                 let titleKeywordsFiltered = titleKeywords.filter { !$0.isEmpty }
                 let locationKeywords = parseFilterString(location)
                 
-                
                 let filtered = converted.filter { job in
                     var matches = true
+                    
                     if !titleKeywordsFiltered.isEmpty {
                         matches = titleKeywordsFiltered.contains { keyword in
-                            job.title.localizedCaseInsensitiveContains(keyword)
+                            job.title.localizedCaseInsensitiveContains(keyword) ||
+                            job.description.localizedCaseInsensitiveContains(keyword) ||
+                            (job.department?.localizedCaseInsensitiveContains(keyword) ?? false)
                         }
                         if !matches {
+                            print("🎵 [TikTok] Filtered out '\(job.title)' - title doesn't match")
                         }
                     }
                     
@@ -74,15 +85,19 @@ actor TikTokJobFetcher: JobFetcherProtocol {
                             job.location.localizedCaseInsensitiveContains(keyword)
                         }
                         if !matches {
+                            print("🎵 [TikTok] Filtered out '\(job.title)' - location '\(job.location)' doesn't match \(locationKeywords)")
                         }
                     }
                     
                     return matches
                 }
                 
+                print("🎵 [TikTok] Page \(pageNumber): \(converted.count) total, \(filtered.count) after filtering")
+                
                 allJobs.append(contentsOf: filtered)
                                 
                 if pageJobs.count < pageSize {
+                    print("🎵 [TikTok] Received fewer than \(pageSize) jobs, stopping")
                     break
                 }
                 
@@ -91,9 +106,12 @@ actor TikTokJobFetcher: JobFetcherProtocol {
                 
                 try await Task.sleep(nanoseconds: 300_000_000)
             } catch {
+                print("🎵 [TikTok] Error fetching page \(pageNumber): \(error)")
                 break
             }
         }
+        
+        print("🎵 [TikTok] Total jobs fetched: \(allJobs.count) from \(pageNumber - 1) pages")
         
         await saveNewTikTokJobIds(allJobs.map { $0.id })
         return allJobs
@@ -142,6 +160,7 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         request.httpBody = jsonData
         
         if offset == 0, let debugBody = String(data: jsonData, encoding: .utf8) {
+            print("🎵 [TikTok] Request body: \(debugBody)")
         }
         
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -151,6 +170,7 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         }
         guard httpResponse.statusCode == 200 else {
             if let errStr = String(data: data, encoding: .utf8) {
+                print("🎵 [TikTok] HTTP Error \(httpResponse.statusCode): \(errStr)")
             }
             throw FetchError.httpError(httpResponse.statusCode)
         }
@@ -173,23 +193,6 @@ actor TikTokJobFetcher: JobFetcherProtocol {
             "limit": pageSize,
             "offset": offset
         ]
-        
-        if !titleKeywords.isEmpty {
-            body["keyword"] = titleKeywords.joined(separator: " ")
-        }
-        
-        // map human-readable location -> TikTok codes (simplified)
-        var locationCodes: [String] = []
-        if !location.isEmpty {
-            let loc = location.lowercased()
-            if loc.contains("seattle") { locationCodes.append("CT_157") }
-            if loc.contains("los angeles") { locationCodes.append("CT_94") }
-            if loc.contains("new york") || loc.contains("nyc") { locationCodes.append("CT_163") }
-        }
-        
-        if !locationCodes.isEmpty {
-            body["location_code_list"] = locationCodes
-        }
         
         return body
     }
@@ -233,8 +236,10 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         do {
             let data = try Data(contentsOf: url)
             let ids = try JSONDecoder().decode([String].self, from: data)
+            print("🎵 [TikTok] Loaded \(ids.count) stored job IDs")
             return Set(ids)
         } catch {
+            print("🎵 [TikTok] No stored job IDs found")
             return []
         }
     }
@@ -252,7 +257,9 @@ actor TikTokJobFetcher: JobFetcherProtocol {
             let data = try JSONEncoder().encode(Array(trimmed))
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url)
+            print("🎵 [TikTok] Saved \(trimmed.count) job IDs")
         } catch {
+            print("🎵 [TikTok] Failed to save job IDs: \(error)")
         }
     }
 }

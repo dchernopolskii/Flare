@@ -16,8 +16,8 @@ struct SettingsView: View {
     @State private var maxPagesToFetch = 5.0
     @State private var enableMicrosoft = true
     @State private var enableTikTok = false
-    @State private var enableApple = true
     @State private var enableSnap = true
+    @State private var enableAMD = true
     @State private var enableCustomBoards = true
     @State private var includeRemoteJobs = true
     @State private var showSuccessMessage = false
@@ -56,21 +56,21 @@ struct SettingsView: View {
                                 }
                             }
                             
-                            Toggle(isOn: $enableApple) {
-                                HStack {
-                                    Image(systemName: JobSource.apple.icon)
-                                        .foregroundColor(JobSource.apple.color)
-                                    Text("Apple Jobs")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
                             Toggle(isOn: $enableSnap) {
                                 HStack {
                                     Image(systemName: JobSource.snap.icon)
                                         .foregroundColor(JobSource.snap.color)
                                     Text("Snap Inc. Careers")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            Toggle(isOn: $enableAMD) {
+                                HStack {
+                                    Image(systemName: JobSource.amd.icon)
+                                        .foregroundColor(JobSource.amd.color)
+                                    Text("AMD Careers")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
@@ -165,11 +165,11 @@ struct SettingsView: View {
                                 if jobManager.fetchStatistics.tiktokJobs > 0 {
                                     StatRow(label: "TikTok", value: "\(jobManager.fetchStatistics.tiktokJobs)")
                                 }
-                                if jobManager.fetchStatistics.appleJobs > 0 {
-                                    StatRow(label: "Apple", value: "\(jobManager.fetchStatistics.appleJobs)")
-                                }
                                 if jobManager.fetchStatistics.snapJobs > 0 {
                                     StatRow(label: "Snap", value: "\(jobManager.fetchStatistics.snapJobs)")
+                                }
+                                if jobManager.fetchStatistics.amdJobs > 0 {
+                                    StatRow(label: "AMD", value: "\(jobManager.fetchStatistics.amdJobs)")
                                 }
                                 if jobManager.fetchStatistics.customBoardJobs > 0 {
                                     StatRow(label: "Custom Boards", value: "\(jobManager.fetchStatistics.customBoardJobs)")
@@ -227,8 +227,8 @@ struct SettingsView: View {
         maxPagesToFetch = Double(jobManager.maxPagesToFetch)
         enableMicrosoft = jobManager.enableMicrosoft
         enableTikTok = jobManager.enableTikTok
-        enableApple = jobManager.enableApple
         enableSnap = jobManager.enableSnap
+        enableAMD = jobManager.enableAMD
         enableCustomBoards = jobManager.enableCustomBoards
         includeRemoteJobs = jobManager.includeRemoteJobs
     }
@@ -240,8 +240,8 @@ struct SettingsView: View {
         jobManager.maxPagesToFetch = Int(maxPagesToFetch)
         jobManager.enableMicrosoft = enableMicrosoft
         jobManager.enableTikTok = enableTikTok
-        jobManager.enableApple = enableApple
         jobManager.enableSnap = enableSnap
+        jobManager.enableAMD = enableAMD
         jobManager.enableCustomBoards = enableCustomBoards
         jobManager.includeRemoteJobs = includeRemoteJobs
         

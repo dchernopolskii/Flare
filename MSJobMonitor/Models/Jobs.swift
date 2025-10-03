@@ -82,10 +82,10 @@ struct Job: Identifiable, Codable, Equatable {
         case .greenhouse, .workable, .jobvite, .lever, .bamboohr,
              .smartrecruiters, .ashby, .jazzhr, .recruitee, .breezyhr:
             return "Apply on Company Website"
-        case .apple:
-            return "Apply on Apple Careers"
         case .snap:
             return "Apply on Snap Careers"
+        case .amd:
+            return "Apply on AMD Careers"
         }
     }
 }
@@ -94,8 +94,8 @@ struct Job: Identifiable, Codable, Equatable {
 enum JobSource: String, Codable, CaseIterable {
     case microsoft = "Microsoft"
     case tiktok = "TikTok"
-    case apple = "Apple"
     case snap = "Snap"
+    case amd = "AMD"
     case greenhouse = "Greenhouse"
     case workable = "Workable"
     case jobvite = "Jobvite"
@@ -111,8 +111,8 @@ enum JobSource: String, Codable, CaseIterable {
         switch self {
         case .microsoft: return "building.2.fill"
         case .tiktok: return "music.note.tv.fill"
-        case .apple: return "applelogo"
         case .snap: return "camera.fill"
+        case .amd: return "cpu.fill"
         case .greenhouse: return "leaf.fill"
         case .workable: return "briefcase.circle.fill"
         case .jobvite: return "person.3.fill"
@@ -130,8 +130,8 @@ enum JobSource: String, Codable, CaseIterable {
         switch self {
         case .microsoft: return .blue
         case .tiktok: return .pink
-        case .apple: return .black
         case .snap: return .yellow
+        case .amd: return .red
         case .greenhouse: return .green
         case .workable: return .purple
         case .jobvite: return .orange
@@ -152,10 +152,10 @@ enum JobSource: String, Codable, CaseIterable {
             return .microsoft
         } else if lowercased.contains("lifeattiktok.com") || lowercased.contains("tiktok.com") {
             return .tiktok
-        } else if lowercased.contains("jobs.apple.com") {
-            return .apple
         } else if lowercased.contains("careers.snap.com") || lowercased.contains("snap.com/careers") {
             return .snap
+        } else if lowercased.contains("careers.amd.com") {
+            return .amd
         } else if lowercased.contains("greenhouse.io") {
             return .greenhouse
         } else if lowercased.contains("workable.com") {
@@ -316,7 +316,7 @@ class QualificationExtractor {
 extension JobSource {
     var isSupported: Bool {
         switch self {
-        case .microsoft, .tiktok, .greenhouse, .ashby, .lever, .apple, .snap:
+        case .microsoft, .tiktok, .greenhouse, .ashby, .lever, .snap, .amd:
             return true
         default:
             return false

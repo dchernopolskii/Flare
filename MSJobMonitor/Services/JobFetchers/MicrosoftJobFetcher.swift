@@ -11,10 +11,8 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
     private let baseURL = "https://gcsservices.careers.microsoft.com/search/api/v1/search"
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int = 5) async throws -> [Job] {
-        print("🔵 [Microsoft] Starting fetch with location: '\(location)'")
         
         let targetCountries = LocationService.extractTargetCountries(from: location)
-        print("🔵 [Microsoft] Target countries: \(targetCountries)")
         
         var allJobs: [Job] = []
         var globalSeenJobIds = Set<String>()
@@ -76,7 +74,6 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             JobManager.shared.loadingProgress = ""
         }
         
-        print("🔵 [Microsoft] Total jobs returned: \(allJobs.count)")
         return allJobs
     }
         
@@ -208,7 +205,6 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
         }
         
         if filteredOutCount > 0 {
-            print("🔵 [Microsoft] Filtered out \(filteredOutCount) jobs from non-target countries")
         }
         
         return filteredJobs
