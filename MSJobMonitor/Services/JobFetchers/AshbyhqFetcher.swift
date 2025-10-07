@@ -2,7 +2,7 @@
 //  AshbyFetcher.swift
 //  MSJobMonitor
 //
-//  Created by Dan Chernopolskii on 9/29/25.
+//  Updated to use GraphQL API
 //
 
 import Foundation
@@ -14,24 +14,27 @@ actor AshbyFetcher: JobFetcherProtocol {
     
     func fetchJobs(from url: URL, titleFilter: String = "", locationFilter: String = "") async throws -> [Job] {
         let slug = extractAshbySlug(from: url)
-        guard let apiURL = URL(string: "https://jobs.ashbyhq.com/api/non-user-boards/\(slug)/jobs") else {
-            throw FetchError.invalidURL
+        
+        let jobs = try await fetchJobsViaGraphQL(slug: slug)
+        
+        if let firstJob = jobs.first {
+            print("🔶 [Ashby] First job raw data:")
+            print("  ID: \(firstJob.id)")
+            print("  Title: \(firstJob.title)")
+            print("  Location: \(firstJob.locationName ?? "nil")")
+            print("  Workplace Type: \(firstJob.workplaceType ?? "nil")")
+            print("  Team ID: \(firstJob.teamId)")
+            print("  Secondary Locations: \(firstJob.secondaryLocations.map { $0.locationName })")
+            print("  Compensation: \(firstJob.compensationTierSummary ?? "nil")")
         }
         
-        let (data, response) = try await URLSession.shared.data(from: apiURL)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw FetchError.invalidResponse
-        }
+        let titleKeywords = parseFilterString(titleFilter, includeRemote: false)
+        let locationKeywords = parseFilterString(locationFilter, includeRemote: false)
         
-        let decoded = try JSONDecoder().decode(AshbyResponse.self, from: data)
+        print("🔶 [Ashby] Fetched \(jobs.count) jobs")
         
-        let titleKeywords = parseFilterString(titleFilter)
-        let locationKeywords = parseFilterString(locationFilter)
-        
-        print("🔶 [Ashby] Applying filters - Title keywords: \(titleKeywords), Location keywords: \(locationKeywords)")
-        
-        return decoded.jobs.compactMap { job -> Job? in
-            let location = job.location ?? "Location not specified"
+        return jobs.compactMap { job -> Job? in
+            let location = job.locationName ?? "Location not specified"
             let title = job.title
             
             if !titleKeywords.isEmpty {
@@ -39,7 +42,7 @@ actor AshbyFetcher: JobFetcherProtocol {
                     title.localizedCaseInsensitiveContains(keyword)
                 }
                 if !titleMatches {
-                    print("🔶 [Ashby] Filtered out by title: '\(title)' doesn't match any of \(titleKeywords)")
+                    print("🔶 [Ashby] Filtered out by title: '\(title)'")
                     return nil
                 }
             }
@@ -49,26 +52,99 @@ actor AshbyFetcher: JobFetcherProtocol {
                     location.localizedCaseInsensitiveContains(keyword)
                 }
                 if !locationMatches {
-                    print("🔶 [Ashby] Filtered out by location: '\(location)' doesn't match any of \(locationKeywords)")
+                    print("🔶 [Ashby] Filtered out by location: '\(location)'")
                     return nil
                 }
+            }
+            
+            var fullLocation = location
+            if !job.secondaryLocations.isEmpty {
+                let secondaryLocs = job.secondaryLocations.map { $0.locationName }.joined(separator: ", ")
+                fullLocation += " (+ \(secondaryLocs))"
             }
             
             return Job(
                 id: "ashby-\(job.id)",
                 title: title,
-                location: location,
-                postingDate: ISO8601DateFormatter().date(from: job.updatedAt ?? ""),
+                location: fullLocation,
+                postingDate: nil,
                 url: "https://jobs.ashbyhq.com/\(slug)/\(job.id)",
-                description: HTMLCleaner.cleanHTML(job.description ?? ""),
-                workSiteFlexibility: nil,
+                description: job.compensationTierSummary ?? "",
+                workSiteFlexibility: job.workplaceType,
                 source: .ashby,
                 companyName: slug.capitalized,
-                department: job.department,
-                category: job.team,
+                department: nil,
+                category: nil,
                 firstSeenDate: Date()
             )
         }
+    }
+    
+    // MARK: - GraphQL API Call
+    
+    private func fetchJobsViaGraphQL(slug: String) async throws -> [AshbyJobPosting] {
+        let apiURL = URL(string: "https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobBoardWithTeams")!
+        
+        let query = """
+        query ApiJobBoardWithTeams($organizationHostedJobsPageName: String!) {
+          jobBoard: jobBoardWithTeams(
+            organizationHostedJobsPageName: $organizationHostedJobsPageName
+          ) {
+            teams {
+              id
+              name
+              parentTeamId
+            }
+            jobPostings {
+              id
+              title
+              teamId
+              locationId
+              locationName
+              workplaceType
+              employmentType
+              secondaryLocations {
+                locationId
+                locationName
+              }
+              compensationTierSummary
+            }
+          }
+        }
+        """
+        
+        let variables: [String: Any] = [
+            "organizationHostedJobsPageName": slug
+        ]
+        
+        let requestBody: [String: Any] = [
+            "operationName": "ApiJobBoardWithTeams",
+            "query": query,
+            "variables": variables
+        ]
+        
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        
+        print("🔶 [Ashby] Fetching jobs for '\(slug)'...")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw FetchError.invalidResponse
+        }
+        
+        let decoded = try JSONDecoder().decode(AshbyGraphQLResponse.self, from: data)
+        
+        guard let jobPostings = decoded.data.jobBoard?.jobPostings else {
+            throw FetchError.parsingFailed
+        }
+        
+        print("🔶 [Ashby] Received \(jobPostings.count) jobs")
+        return jobPostings
     }
     
     // MARK: - Helper Methods
@@ -105,17 +181,40 @@ actor AshbyFetcher: JobFetcherProtocol {
     }
 }
 
-// MARK: - Ashby API Models
-struct AshbyResponse: Codable {
-    let jobs: [AshbyJob]
+// MARK: - Ashby GraphQL Models
+
+struct AshbyGraphQLResponse: Codable {
+    let data: AshbyData
 }
 
-struct AshbyJob: Codable {
+struct AshbyData: Codable {
+    let jobBoard: AshbyJobBoard?
+}
+
+struct AshbyJobBoard: Codable {
+    let teams: [AshbyTeam]
+    let jobPostings: [AshbyJobPosting]
+}
+
+struct AshbyTeam: Codable {
+    let id: String
+    let name: String
+    let parentTeamId: String?
+}
+
+struct AshbyJobPosting: Codable {
     let id: String
     let title: String
-    let location: String?
-    let description: String?
-    let department: String?
-    let team: String?
-    let updatedAt: String?
+    let teamId: String
+    let locationId: String?
+    let locationName: String?
+    let workplaceType: String?
+    let employmentType: String?
+    let secondaryLocations: [AshbySecondaryLocation]
+    let compensationTierSummary: String?
+}
+
+struct AshbySecondaryLocation: Codable {
+    let locationId: String
+    let locationName: String
 }

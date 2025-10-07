@@ -65,6 +65,12 @@ struct JobRow: View {
                             .foregroundColor(.primary)
                             .lineLimit(1)
                         
+                        if jobManager.isJobStarred(job) {
+                            Image(systemName: "star.fill")
+                                .foregroundColor(.yellow)
+                                .font(.caption)
+                        }
+                        
                         if isNew {
                             Badge(text: "NEW", color: .orange)
                         }
@@ -113,7 +119,17 @@ struct JobRow: View {
                 
                 Spacer()
                 
-                // Chevron
+                if isHovered || jobManager.isJobStarred(job) {
+                    Button(action: {
+                        jobManager.toggleStarred(for: job)
+                    }) {
+                        Image(systemName: jobManager.isJobStarred(job) ? "star.fill" : "star")
+                            .foregroundColor(jobManager.isJobStarred(job) ? .yellow : .secondary)
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                }
+                
                 Image(systemName: isSelected ? "chevron.down" : "chevron.right")
                     .foregroundColor(.secondary)
                     .opacity(isHovered || isSelected ? 1 : 0.5)
@@ -135,6 +151,8 @@ struct JobRow: View {
         Group {
             if isSelected {
                 Color.accentColor.opacity(0.1)
+            } else if jobManager.isJobStarred(job) {
+                Color.yellow.opacity(0.05)
             } else if jobManager.isJobApplied(job) {
                 Color.green.opacity(0.05)
             } else if isNew {
@@ -170,6 +188,16 @@ struct JobRowContextMenu: View {
     
     var body: some View {
         Group {
+            Button(action: {
+                jobManager.toggleStarred(for: job)
+            }) {
+                if jobManager.isJobStarred(job) {
+                    Label("Remove from favorites", systemImage: "star.slash")
+                } else {
+                    Label("Favorite", systemImage: "star")
+                }
+            }
+            
             Button(action: {
                 jobManager.toggleAppliedStatus(for: job)
             }) {

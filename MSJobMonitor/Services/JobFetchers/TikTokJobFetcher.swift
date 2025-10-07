@@ -11,13 +11,14 @@ import Foundation
 actor TikTokJobFetcher: JobFetcherProtocol {
     private let apiURL = URL(string: "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts")!
     private let pageSize = 12
-    private let maxJobs = 3500
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int) async throws -> [Job] {
         print("🎵 [TikTok] Starting TikTok job fetch...")
         print("🎵 [TikTok] Title keywords: \(titleKeywords)")
         print("🎵 [TikTok] Location: \(location)")
-        print("🎵 [TikTok] Max pages: \(maxPages)")
+        
+        let locationCodes = LocationService.getTikTokLocationCodes(location)
+        print("🎵 [TikTok] Location codes: \(locationCodes)")
         
         var allJobs: [Job] = []
         var currentOffset = 0
@@ -25,13 +26,13 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         let storedJobIds = await loadStoredTikTokJobIds()
         let currentDate = Date()
         
-        while allJobs.count < maxJobs && pageNumber <= maxPages {
+        while allJobs.count < 5000 && pageNumber <= maxPages {
             print("🎵 [TikTok] Fetching page \(pageNumber) (offset: \(currentOffset))...")
             
             do {
                 let pageJobs = try await fetchJobsPage(
-                    titleKeywords: [],
-                    location: "",
+                    titleKeywords: titleKeywords,
+                    locationCodes: locationCodes,
                     offset: currentOffset
                 )
                 
@@ -63,39 +64,8 @@ actor TikTokJobFetcher: JobFetcherProtocol {
                     )
                 }
                 
-                let titleKeywordsFiltered = titleKeywords.filter { !$0.isEmpty }
-                let locationKeywords = parseFilterString(location)
+                allJobs.append(contentsOf: converted)
                 
-                let filtered = converted.filter { job in
-                    var matches = true
-                    
-                    if !titleKeywordsFiltered.isEmpty {
-                        matches = titleKeywordsFiltered.contains { keyword in
-                            job.title.localizedCaseInsensitiveContains(keyword) ||
-                            job.description.localizedCaseInsensitiveContains(keyword) ||
-                            (job.department?.localizedCaseInsensitiveContains(keyword) ?? false)
-                        }
-                        if !matches {
-                            print("🎵 [TikTok] Filtered out '\(job.title)' - title doesn't match")
-                        }
-                    }
-                    
-                    if matches && !locationKeywords.isEmpty {
-                        matches = locationKeywords.contains { keyword in
-                            job.location.localizedCaseInsensitiveContains(keyword)
-                        }
-                        if !matches {
-                            print("🎵 [TikTok] Filtered out '\(job.title)' - location '\(job.location)' doesn't match \(locationKeywords)")
-                        }
-                    }
-                    
-                    return matches
-                }
-                
-                print("🎵 [TikTok] Page \(pageNumber): \(converted.count) total, \(filtered.count) after filtering")
-                
-                allJobs.append(contentsOf: filtered)
-                                
                 if pageJobs.count < pageSize {
                     print("🎵 [TikTok] Received fewer than \(pageSize) jobs, stopping")
                     break
@@ -116,33 +86,8 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         await saveNewTikTokJobIds(allJobs.map { $0.id })
         return allJobs
     }
-
-    private func parseFilterString(_ filterString: String, includeRemote: Bool = true) -> [String] {
-        guard !filterString.isEmpty else { return [] }
-        
-        var keywords = filterString
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        
-        if includeRemote {
-            let remoteKeywords = ["remote", "work from home", "distributed", "anywhere"]
-            let hasRemoteKeyword = keywords.contains { keyword in
-                remoteKeywords.contains { remote in
-                    keyword.localizedCaseInsensitiveContains(remote)
-                }
-            }
-            
-            if !hasRemoteKeyword {
-                keywords.append("remote")
-            }
-        }
-        
-        return keywords
-    }
     
-    // MARK: - Page Fetch
-    private func fetchJobsPage(titleKeywords: [String], location: String, offset: Int) async throws -> [TikTokJob] {
+    private func fetchJobsPage(titleKeywords: [String], locationCodes: [String], offset: Int) async throws -> [TikTokJob] {
         var request = URLRequest(url: apiURL)
         request.httpMethod = "POST"
         
@@ -151,11 +96,16 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("https://lifeattiktok.com", forHTTPHeaderField: "origin")
         request.setValue("https://lifeattiktok.com/", forHTTPHeaderField: "referer")
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36", forHTTPHeaderField: "user-agent")
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "user-agent")
         request.setValue("tiktok", forHTTPHeaderField: "website-path")
         request.timeoutInterval = 15
         
-        let body = buildRequestBody(titleKeywords: titleKeywords, location: location, offset: offset)
+        let body = buildRequestBody(
+            titleKeywords: titleKeywords,
+            locationCodes: locationCodes,
+            offset: offset
+        )
+        
         let jsonData = try JSONSerialization.data(withJSONObject: body)
         request.httpBody = jsonData
         
@@ -183,13 +133,13 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         return decoded.data.job_post_list
     }
     
-    private func buildRequestBody(titleKeywords: [String], location: String, offset: Int) -> [String: Any] {
+    private func buildRequestBody(titleKeywords: [String], locationCodes: [String], offset: Int) -> [String: Any] {
         var body: [String: Any] = [
             "recruitment_id_list": ["1"],
             "job_category_id_list": [],
             "subject_id_list": [],
-            "location_code_list": [],
-            "keyword": "",
+            "location_code_list": locationCodes,
+            "keyword": titleKeywords.joined(separator: " "),
             "limit": pageSize,
             "offset": offset
         ]

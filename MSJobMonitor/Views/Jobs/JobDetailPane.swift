@@ -102,6 +102,12 @@ struct JobInfoSection: View {
                 
                 Spacer()
                 
+                if jobManager.isJobStarred(job) {
+                    Image(systemName: "star.fill")
+                        .foregroundColor(.yellow)
+                        .font(.title3)
+                }
+                
                 if jobManager.isJobApplied(job) {
                     Badge(text: "APPLIED", color: .green)
                 }
@@ -252,6 +258,21 @@ struct JobDetailActions: View {
             .controlSize(.large)
             
             HStack(spacing: 8) {
+                
+                Button(action: {
+                    jobManager.toggleStarred(for: job)
+                }) {
+                    HStack {
+                        Image(systemName: jobManager.isJobStarred(job) ? "star.fill" : "star")
+                        Text(jobManager.isJobStarred(job) ? "Starred" : "Star")
+                    }
+                    .font(.callout)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.bordered)
+                .tint(jobManager.isJobStarred(job) ? .yellow : .gray)
+                
                 Button(action: {
                     jobManager.toggleAppliedStatus(for: job)
                 }) {

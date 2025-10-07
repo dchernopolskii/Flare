@@ -26,6 +26,7 @@ class JobManager: ObservableObject {
     @Published var newJobsCount = 0
     @Published var appliedJobIds: Set<String> = []
     @Published var fetchStatistics = FetchStatistics()
+    @Published var starredJobIds: Set<String> = []
     
     var jobs: [Job] {
         return allJobs.filter { job in
@@ -298,6 +299,21 @@ class JobManager: ObservableObject {
         }
     }
     
+    func toggleStarred(for job: Job) {
+        if starredJobIds.contains(job.id) {
+            starredJobIds.remove(job.id)
+        } else {
+            starredJobIds.insert(job.id)
+        }
+        Task {
+            try await persistenceService.saveStarredJobIds(starredJobIds)
+        }
+    }
+
+    func isJobStarred(_ job: Job) -> Bool {
+        return starredJobIds.contains(job.id)
+    }
+    
     func isJobApplied(_ job: Job) -> Bool {
         return appliedJobIds.contains(job.id)
     }
@@ -460,6 +476,7 @@ class JobManager: ObservableObject {
             
             storedJobIds = try await persistenceService.loadStoredJobIds()
             appliedJobIds = try await persistenceService.loadAppliedJobIds()
+            starredJobIds = try await persistenceService.loadStarredJobIds()
             
             for (source, jobs) in jobsBySource {
             }

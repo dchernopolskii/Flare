@@ -66,7 +66,7 @@ struct JobListView: View {
     
     @State private var searchText = UserDefaults.standard.string(forKey: "jobSearchText") ?? ""
     @PersistedJobSources private var selectedSources
-    @State private var showOnlyNew = UserDefaults.standard.bool(forKey: "showOnlyNewJobs")
+    @State private var showOnlyStarred = UserDefaults.standard.bool(forKey: "showOnlyStarredJobs")
     @State private var showOnlyApplied = UserDefaults.standard.bool(forKey: "showOnlyAppliedJobs")
 
     var filteredJobs: [Job] {
@@ -85,15 +85,8 @@ struct JobListView: View {
             result = result.filter { selectedSources.contains($0.source) }
         }
         
-        if showOnlyNew {
-            result = result.filter { job in
-                if let postingDate = job.postingDate {
-                    return Date().timeIntervalSince(postingDate) < 7200            let locationKeywords = parseFilterString(locationFilter)
-
-                } else {
-                    return Date().timeIntervalSince(job.firstSeenDate) < 7200
-                }
-            }
+        if showOnlyStarred {
+            result = result.filter { jobManager.isJobStarred($0) }
         }
         
         if showOnlyApplied {
@@ -109,7 +102,7 @@ struct JobListView: View {
             JobListHeader(
                 searchText: $searchText,
                 selectedSources: $selectedSources,
-                showOnlyNew: $showOnlyNew,
+                showOnlyStarred: $showOnlyStarred,
                 showOnlyApplied: $showOnlyApplied
             )
             
@@ -139,8 +132,8 @@ struct JobListView: View {
         .onChange(of: searchText) { newValue in
             UserDefaults.standard.set(newValue, forKey: "jobSearchText")
         }
-        .onChange(of: showOnlyNew) { newValue in
-            UserDefaults.standard.set(newValue, forKey: "showOnlyNewJobs")
+        .onChange(of: showOnlyStarred) { newValue in
+            UserDefaults.standard.set(newValue, forKey: "showOnlyStarredJobs")
         }
         .onChange(of: showOnlyApplied) { newValue in
             UserDefaults.standard.set(newValue, forKey: "showOnlyAppliedJobs")
@@ -153,12 +146,15 @@ struct JobListHeader: View {
     @EnvironmentObject var boardMonitor: JobBoardMonitor
     @Binding var searchText: String
     @Binding var selectedSources: Set<JobSource>
-    @Binding var showOnlyNew: Bool
+    @Binding var showOnlyStarred: Bool
     @Binding var showOnlyApplied: Bool
     
+    // Show all possible sources
     private var supportedSources: [JobSource] {
-        let jobSources = Set(jobManager.jobs.map { $0.source })
-        return Array(jobSources).sorted { $0.rawValue < $1.rawValue }
+        // Return all supported source types
+        return [.microsoft, .tiktok, .snap, .amd, .greenhouse, .lever, .ashby]
+            .filter { $0.isSupported }
+            .sorted { $0.rawValue < $1.rawValue }
     }
     
     private var allSourcesSelected: Bool {
@@ -201,12 +197,17 @@ struct JobListHeader: View {
                                 HStack {
                                     Image(systemName: selectedSources.contains(source) ? "checkmark.square.fill" : "square")
                                     Image(systemName: source.icon)
+                                        .foregroundColor(source.color)
                                     Text(source.rawValue)
                                     
+                                    // Show job count
                                     let count = jobManager.jobs.filter { $0.source == source }.count
                                     if count > 0 {
                                         Text("(\(count))")
                                             .foregroundColor(.secondary)
+                                    } else {
+                                        Text("(0)")
+                                            .foregroundColor(.secondary.opacity(0.5))
                                     }
                                     
                                     Spacer()
@@ -258,9 +259,9 @@ struct JobListHeader: View {
                 .cornerRadius(8)
                 
                 // Filter Toggles
-                Toggle(isOn: $showOnlyNew) {
-                    Label("New", systemImage: "sparkles")
-                        .foregroundColor(showOnlyNew ? .accentColor : .secondary)
+                Toggle(isOn: $showOnlyStarred) {
+                    Label("Starred", systemImage: "star.fill")
+                        .foregroundColor(showOnlyStarred ? .yellow : .secondary)
                 }
                 .toggleStyle(.button)
                 

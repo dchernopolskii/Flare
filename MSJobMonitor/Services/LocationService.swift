@@ -243,3 +243,150 @@ struct LocationService {
         return countries
     }
 }
+
+extension LocationService {
+    
+    // MARK: - Microsoft API Mapping
+    static func getMicrosoftLocationParams(_ locationString: String) -> [String] {
+        let countries = extractTargetCountries(from: locationString)
+        return countries.map { country in
+            switch country {
+            case "United States": return "United States"
+            case "Canada": return "Canada"
+            case "United Kingdom": return "United Kingdom"
+            case "Germany": return "Germany"
+            case "France": return "France"
+            case "India": return "India"
+            case "Australia": return "Australia"
+            case "Ireland": return "Ireland"
+            case "Netherlands": return "Netherlands"
+            case "Singapore": return "Singapore"
+            default: return country
+            }
+        }
+    }
+    
+    // MARK: - TikTok API Mapping
+    static func getTikTokLocationCodes(_ locationString: String) -> [String] {
+        let locations = parseLocations(from: locationString)
+        var codes: [String] = []
+        
+        for location in locations {
+            if let code = cityCodeMap[location.lowercased()] {
+                codes.append(code)
+            } else if let stateCode = getStateCodes(for: location) {
+                codes.append(contentsOf: stateCode)
+            }
+        }
+        
+        return codes
+    }
+
+    private static func parseLocations(from locationString: String) -> [String] {
+        return locationString
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !$0.lowercased().contains("remote") }
+    }
+    
+    private static func getStateCodes(for location: String) -> [String]? {
+        let lower = location.lowercased()
+        
+        switch lower {
+        case "washington", "wa":
+            return ["CT_157"] // Seattle
+        case "california", "ca":
+            return ["CT_75", "CT_94", "CT_243", "CT_1103355"] // SF, LA, Mountain View, San Jose
+        case "new york", "ny":
+            return ["CT_114"] // New York
+        case "texas", "tx":
+            return ["CT_247"] // Austin
+        default:
+            return nil
+        }
+    }
+    
+    // MARK: - Static Mappings
+    private static let countryMap: [String: String] = [
+        "usa": "United States",
+        "us": "United States",
+        "united states": "United States",
+        "canada": "Canada",
+        "uk": "United Kingdom",
+        "united kingdom": "United Kingdom",
+        "germany": "Germany",
+        "france": "France",
+        "india": "India",
+        "australia": "Australia",
+        "ireland": "Ireland",
+        "netherlands": "Netherlands",
+        "singapore": "Singapore"
+    ]
+    
+    private static let locationToCountryMap: [String: String] = [
+        "seattle": "United States",
+        "san francisco": "United States",
+        "sf": "United States",
+        "new york": "United States",
+        "nyc": "United States",
+        "los angeles": "United States",
+        "la": "United States",
+        "austin": "United States",
+        "chicago": "United States",
+        "boston": "United States",
+        "washington": "United States",
+        "dc": "United States",
+        "california": "United States",
+        "washington": "United States",
+        "texas": "United States",
+        "new york": "United States",
+        "london": "United Kingdom",
+        "dublin": "Ireland",
+        "paris": "France",
+        "berlin": "Germany",
+        "bangalore": "India",
+        "sydney": "Australia",
+        "amsterdam": "Netherlands",
+        "singapore": "Singapore"
+    ]
+    
+    // TikTok City Code Mapping (from API response)
+    private static let cityCodeMap: [String: String] = [
+        "seattle": "CT_157",
+        "san francisco": "CT_75",
+        "new york": "CT_114",
+        "los angeles": "CT_94",
+        "austin": "CT_247",
+        "chicago": "CT_221",
+        "mountain view": "CT_243",
+        "san jose": "CT_1103355",
+        "washington d.c.": "CT_233",
+        "dc": "CT_233",
+        "boston": "CT_114",
+        "london": "CT_93",
+        "dublin": "CT_37",
+        "paris": "CT_5",
+        "berlin": "CT_6",
+        "amsterdam": "CT_100766",
+        "singapore": "CT_163",
+        "tokyo": "CT_34",
+        "sydney": "CT_244",
+        "bangalore": "CT_44",
+        "gurgaon": "CT_44",
+        "stockholm": "CT_1102285",
+        "copenhagen": "CT_101458",
+        "munich": "CT_226",
+        "madrid": "CT_96",
+        "milan": "CT_204",
+        "brussels": "CT_235",
+        "warsaw": "CT_209",
+        "istanbul": "CT_206",
+        "dubai": "CT_33",
+        "tel aviv": "CT_249",
+        "jakarta": "CT_169",
+        "bangkok": "CT_98",
+        "kuala lumpur": "CT_65",
+        "seoul": "CT_134",
+        "ho chi minh city": "CT_60"
+    ]
+}

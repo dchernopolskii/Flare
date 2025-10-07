@@ -90,4 +90,21 @@ actor PersistenceService {
         let ids = try JSONDecoder().decode([String].self, from: data)
         return Set(ids)
     }
+    
+    // MARK: - Favorties
+    func saveStarredJobIds(_ ids: Set<String>) async throws {
+        let url = appSupportURL.appendingPathComponent("starredJobs.json")
+        let data = try JSONEncoder().encode(Array(ids))
+        try data.write(to: url)
+    }
+
+    func loadStarredJobIds() async throws -> Set<String> {
+        let url = appSupportURL.appendingPathComponent("starredJobs.json")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return Set<String>()
+        }
+        let data = try Data(contentsOf: url)
+        let ids = try JSONDecoder().decode([String].self, from: data)
+        return Set(ids)
+    }
 }

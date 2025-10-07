@@ -96,6 +96,8 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                         title.localizedCaseInsensitiveContains(keyword)
                     }
                     if !titleMatches {
+                        print("🌱 [Greenhouse] Filtered out by title: '\(title)' doesn't match any of \(titleKeywords)")
+
                         return nil
                     }
                 }
@@ -105,6 +107,8 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                         location.localizedCaseInsensitiveContains(keyword)
                     }
                     if !locationMatches {
+                        print("🌱 [Greenhouse] Filtered out by location: '\(location)' doesn't match any of \(locationKeywords)")
+
                         return nil
                     }
                 }
