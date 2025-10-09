@@ -12,12 +12,14 @@ actor AMDFetcher: JobFetcherProtocol {
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int) async throws -> [Job] {
         
+        let safeMaxPages = max(1, min(maxPages, 20))
+        
         var allJobs: [Job] = []
         let pageSize = 20
         
         let locationQuery = parseLocationForAMD(location)
         
-        for page in 1...maxPages {
+        for page in 1...safeMaxPages {
             let pageJobs = try await fetchJobsPage(
                 page: page,
                 keywords: titleKeywords.joined(separator: " "),
@@ -29,7 +31,6 @@ actor AMDFetcher: JobFetcherProtocol {
             }
             
             allJobs.append(contentsOf: pageJobs)
-            
             
             if pageJobs.count < pageSize {
                 break

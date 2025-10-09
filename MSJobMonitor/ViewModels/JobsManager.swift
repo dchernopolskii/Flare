@@ -51,11 +51,14 @@ class JobManager: ObservableObject {
         didSet { UserDefaults.standard.set(locationFilter, forKey: "locationFilter") }
     }
 
-    @Published var refreshInterval: Double = UserDefaults.standard.double(forKey: "refreshInterval") {
+    @Published var refreshInterval: Double = {
+        let stored = UserDefaults.standard.double(forKey: "refreshInterval")
+        return stored > 0 ? stored : 30.0
+    }() {
         didSet { UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval") }
     }
 
-    @Published var maxPagesToFetch: Int = UserDefaults.standard.integer(forKey: "maxPagesToFetch") {
+    @Published var maxPagesToFetch: Int = UserDefaults.standard.object(forKey: "maxPagesToFetch") as? Int ?? 5 {
         didSet { UserDefaults.standard.set(maxPagesToFetch, forKey: "maxPagesToFetch") }
     }
 
@@ -234,13 +237,13 @@ class JobManager: ObservableObject {
         if enableAMD {
             do {
                 let jobs = try await fetchFromSource(.amd)
-                sourceJobsMap[.snap] = jobs
+                sourceJobsMap[.amd] = jobs
                 let newJobs = filterNewJobs(jobs)
-                allNewJobs.append(contentsOf: newJobs)
+                allJobs.append(contentsOf: newJobs)
                 fetchStatistics.amdJobs = jobs.count
             } catch {
                 lastError = "AMD: \(error.localizedDescription)"
-                if let existingJobs = jobsBySource[.snap] {
+                if let existingJobs = jobsBySource[.amd] {
                     sourceJobsMap[.amd] = existingJobs
                 }
             }
@@ -362,25 +365,25 @@ class JobManager: ObservableObject {
             return try await microsoftFetcher.fetchJobs(
                 titleKeywords: titleKeywords,
                 location: locationFilter,
-                maxPages: Int(maxPagesToFetch)
+                maxPages: max(1, Int(maxPagesToFetch))
             )
         case .tiktok:
             return try await tiktokFetcher.fetchJobs(
                 titleKeywords: titleKeywords,
                 location: locationFilter,
-                maxPages: 350  // Fetch more pages for TikTok since no dates
+                maxPages: max(1, 350)  // Fetch more pages for TikTok since no dates
             )
         case .snap:
              return try await snapFetcher.fetchJobs(
                  titleKeywords: titleKeywords,
                  location: locationFilter,
-                 maxPages: Int(maxPagesToFetch)
+                 maxPages: max(1, Int(maxPagesToFetch))
              )
         case .amd:
              return try await amdFetcher.fetchJobs(
                  titleKeywords: titleKeywords,
                  location: locationFilter,
-                 maxPages: Int(maxPagesToFetch)
+                 maxPages: max(1, Int(maxPagesToFetch))
              )
         case .greenhouse:
             return []

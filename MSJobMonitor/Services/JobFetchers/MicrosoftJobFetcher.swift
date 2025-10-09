@@ -12,7 +12,8 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int = 5) async throws -> [Job] {
         print("🔵 [Microsoft] Starting fetch with location: '\(location)'")
-        
+        let safeMaxPages = max(1, min(maxPages, 20))
+
         var allJobs: [Job] = []
         var globalSeenJobIds = Set<String>()
         
@@ -48,23 +49,26 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
                 JobManager.shared.loadingProgress = "Microsoft search \(index + 1)/\(searchCombinations.count): \(description)"
             }
             
-            let jobs = try await executeIndividualSearch(
-                title: combo.title,
-                country: combo.country,
-                maxPages: max(1, maxPages / searchCombinations.count)
-            )
-            
-            let newJobs = jobs.filter { job in
-                if globalSeenJobIds.contains(job.id) {
-                    return false
+            let pageLimit = min(safeMaxPages, 3)
+            for page in 1...pageLimit {
+                let jobs = try await executeIndividualSearch(
+                    title: combo.title,
+                    country: combo.country,
+                    maxPages: max(1, maxPages / searchCombinations.count)
+                )
+                
+                let newJobs = jobs.filter { job in
+                    if globalSeenJobIds.contains(job.id) {
+                        return false
+                    }
+                    globalSeenJobIds.insert(job.id)
+                    return true
                 }
-                globalSeenJobIds.insert(job.id)
-                return true
+                
+                allJobs.append(contentsOf: newJobs)
+                
+                try await Task.sleep(nanoseconds: 700_000_000)
             }
-            
-            allJobs.append(contentsOf: newJobs)
-            
-            try await Task.sleep(nanoseconds: 700_000_000)
         }
         
         await MainActor.run {
