@@ -50,6 +50,8 @@ struct JobBoardConfigSheet: View {
     }
 }
 
+// MARK: - Header
+
 struct SheetHeader: View {
     let title: String
     let onClose: () -> Void
@@ -72,147 +74,7 @@ struct SheetHeader: View {
     }
 }
 
-struct AddBoardSection: View {
-    @Binding var newBoardName: String
-    @Binding var newBoardURL: String
-    @Binding var testingBoardId: UUID?
-    @StateObject private var monitor = JobBoardMonitor.shared
-    @EnvironmentObject var jobManager: JobManager
-    
-    private var detectedSource: JobSource? {
-        JobSource.detectFromURL(newBoardURL)
-    }
-    
-    private var isValidBoard: Bool {
-        !newBoardURL.isEmpty && detectedSource != nil && (detectedSource?.isSupported ?? false)
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Add Job Board", systemImage: "plus.circle.fill")
-                .font(.headline)
-            
-            TextField("Board Name (e.g., GitLab, Stripe)", text: $newBoardName)
-                .textFieldStyle(.roundedBorder)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                TextField("Board URL (job listing page)", text: $newBoardURL)
-                    .textFieldStyle(.roundedBorder)
-                
-                if !newBoardURL.isEmpty {
-                    SourceDetectionBadge(source: detectedSource)
-                }
-            }
-            
-            Text("Currently supported: Greenhouse, Ashbyhq • Coming soon: Workable, Lever, Jobvite, and more")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            HStack {
-                Button("Add & Test Board") {
-                    addBoard(andTest: false)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!isValidBoard || testingBoardId != nil)
-                
-                if testingBoardId != nil {
-                    HStack {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                        Text("Testing the board...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            
-            if !monitor.testResults.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Recent Test Results", systemImage: "checkmark.circle")
-                        .font(.headline)
-                    
-                    ForEach(Array(monitor.testResults.keys), id: \.self) { boardId in
-                        if let result = monitor.testResults[boardId],
-                           let boardName = monitor.boardConfigs.first(where: { $0.id == boardId })?.displayName {
-                            HStack {
-                                Text(boardName)
-                                    .font(.callout)
-                                    .fontWeight(.medium)
-                                Spacer()
-                                Text(result)
-                                    .font(.callout)
-                                    .foregroundColor(result.hasPrefix("✅") ? .green : .red)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                            .cornerRadius(4)
-                        }
-                    }
-                }
-                .padding()
-                .background(Color.blue.opacity(0.05))
-                .cornerRadius(8)
-            }
-        }
-    }
-    
-    private func addBoard(andTest: Bool) {
-        guard isValidBoard,
-              let config = JobBoardConfig(
-                name: newBoardName.isEmpty ? "" : newBoardName,
-                url: newBoardURL
-              ) else { return }
-        
-        monitor.addBoardConfig(config)
-        
-        testingBoardId = config.id
-        Task {
-            await monitor.testSingleBoard(config)
-            await MainActor.run {
-                testingBoardId = nil
-            }
-        }
-        
-        newBoardName = ""
-        newBoardURL = ""
-    }
-}
-
-struct SourceDetectionBadge: View {
-    let source: JobSource?
-    
-    var body: some View {
-        HStack {
-            if let source = source {
-                Image(systemName: source.icon)
-                    .foregroundColor(source.color)
-                if source.isSupported {
-                    Text("Detected: \(source.rawValue)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.caption)
-                } else {
-                    Text("Detected: \(source.rawValue) (Coming Soon)")
-                        .font(.caption)
-                        .foregroundColor(.orange)
-                    Image(systemName: "clock.circle.fill")
-                        .foregroundColor(.orange)
-                        .font(.caption)
-                }
-            } else {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.red)
-                Text("Unsupported platform")
-                    .font(.caption)
-                    .foregroundColor(.red)
-            }
-        }
-        .padding(.horizontal, 4)
-    }
-}
+// MARK: - Configured Boards List
 
 struct ConfiguredBoardsList: View {
     @Binding var testingBoardId: UUID?
@@ -230,24 +92,35 @@ struct ConfiguredBoardsList: View {
     }
 }
 
+// MARK: - Board Config Row
+
 struct BoardConfigRow: View {
     let config: JobBoardConfig
     @Binding var testingBoardId: UUID?
     @StateObject private var monitor = JobBoardMonitor.shared
     
     var body: some View {
-        HStack {
-            // Icon and Info
+        HStack(alignment: .center, spacing: 12) {
+            // Platform Icon
             Image(systemName: config.source.icon)
                 .foregroundColor(config.source.color)
+                .font(.title3)
                 .frame(width: 30)
             
-            VStack(alignment: .leading) {
+            // Board Info
+            VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(config.displayName)
                         .font(.headline)
+                    
                     if !config.isSupported {
-                        Badge(text: "Coming Soon", color: .orange)
+                        Text("Coming Soon")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.1))
+                            .cornerRadius(4)
                     }
                 }
                 
@@ -256,7 +129,7 @@ struct BoardConfigRow: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                 
-                HStack {
+                HStack(spacing: 8) {
                     Text(config.source.rawValue)
                         .font(.caption2)
                         .padding(.horizontal, 6)
@@ -265,13 +138,17 @@ struct BoardConfigRow: View {
                         .cornerRadius(4)
                     
                     if let lastFetched = config.lastFetched {
-                        Text("Last: \(lastFetched, style: .relative)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
+                                .font(.caption2)
+                            Text("Last: \(lastFetched, style: .relative) ago")
+                                .font(.caption2)
+                        }
+                        .foregroundColor(.secondary)
                     }
                     
                     if let testResult = monitor.testResults[config.id] {
-                        HStack {
+                        HStack(spacing: 4) {
                             if testResult == "Testing..." {
                                 ProgressView()
                                     .scaleEffect(0.7)
@@ -287,10 +164,10 @@ struct BoardConfigRow: View {
                                 .font(.caption)
                                 .fontWeight(.medium)
                                 .foregroundColor(testResult.hasPrefix("✅") ? .green : testResult == "Testing..." ? .blue : .red)
-                                .lineLimit(2)
+                                .lineLimit(1)
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
                         .background(
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(testResult.hasPrefix("✅") ? Color.green.opacity(0.1) :
@@ -311,27 +188,28 @@ struct BoardConfigRow: View {
                 }) {
                     if testingBoardId == config.id {
                         ProgressView()
-                            .scaleEffect(0.8)
+                            .scaleEffect(0.7)
                     } else {
-                        Image(systemName: config.isSupported ? "play.circle" : "clock.circle")
-                            .foregroundColor(config.isSupported ? .blue : .orange)
+                        Image(systemName: "arrow.clockwise")
                     }
                 }
-                .buttonStyle(.plain)
-                .help(config.isSupported ? "Test this job board" : "Coming soon")
+                .buttonStyle(.borderless)
                 .disabled(!config.isSupported || testingBoardId != nil)
+                .help("Test board connection")
                 
-                // Enable Toggle
+                // Enable/Disable Toggle
                 Toggle("", isOn: Binding(
                     get: { config.isEnabled },
                     set: { newValue in
-                        var updatedConfig = config
-                        updatedConfig.isEnabled = newValue
-                        monitor.updateBoardConfig(updatedConfig)
+                        var updated = config
+                        updated.isEnabled = newValue
+                        monitor.updateBoardConfig(updated)
                     }
                 ))
                 .toggleStyle(.switch)
+                .controlSize(.small)
                 .disabled(!config.isSupported)
+                .help(config.isEnabled ? "Enabled" : "Disabled")
                 
                 // Delete Button
                 Button(action: {
@@ -340,13 +218,17 @@ struct BoardConfigRow: View {
                     Image(systemName: "trash")
                         .foregroundColor(.red)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+                .help("Delete board")
             }
         }
         .padding()
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(config.isEnabled ? Color(NSColor.controlBackgroundColor) : Color.gray.opacity(0.1))
         .cornerRadius(8)
-        .opacity(config.isSupported ? 1.0 : 0.6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(config.isEnabled ? Color.clear : Color.gray.opacity(0.3), lineWidth: 1)
+        )
     }
     
     private func testBoard() {
@@ -366,6 +248,49 @@ struct BoardConfigRow: View {
     }
 }
 
+// MARK: - Source Detection Badge
+
+struct SourceDetectionBadge: View {
+    let source: JobSource?
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            if let source = source {
+                Image(systemName: source.icon)
+                    .foregroundColor(source.color)
+                    .font(.caption)
+                
+                if source.isSupported {
+                    Text("Detected: \(source.rawValue)")
+                        .foregroundColor(.green)
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                } else {
+                    Text("Detected: \(source.rawValue) (Not yet supported)")
+                        .foregroundColor(.orange)
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                }
+            } else {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.red)
+                Text("Platform not recognized")
+                    .foregroundColor(.red)
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            (source?.isSupported ?? false) ? Color.green.opacity(0.1) :
+            source != nil ? Color.orange.opacity(0.1) : Color.red.opacity(0.1)
+        )
+        .cornerRadius(6)
+    }
+}
+
+// MARK: - Supported Platforms Info
+
 struct SupportedPlatformsInfo: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -374,7 +299,7 @@ struct SupportedPlatformsInfo: View {
             
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(JobSource.allCases, id: \.self) { source in
-                    if source != .microsoft && source != .tiktok && source != .snap && source != .amd{
+                    if source != .microsoft && source != .tiktok && source != .snap && source != .amd {
                         HStack {
                             Image(systemName: source.icon)
                                 .foregroundColor(source.color)
@@ -401,6 +326,8 @@ struct SupportedPlatformsInfo: View {
         }
     }
 }
+
+// MARK: - Footer
 
 struct SheetFooter: View {
     let dismiss: () -> Void

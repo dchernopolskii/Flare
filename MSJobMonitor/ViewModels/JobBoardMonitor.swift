@@ -22,6 +22,7 @@ class JobBoardMonitor: ObservableObject {
     private let greenhouseFetcher = GreenhouseFetcher()
     private let ashbyFetcher = AshbyFetcher()
     private let leverFetcher = LeverFetcher()
+    private let workdayFetcher = WorkdayFetcher()
     private var monitorTimer: Timer?
     
     private init() {
@@ -130,6 +131,49 @@ class JobBoardMonitor: ObservableObject {
         return allJobs
     }
     
+    // MARK: - Import/Export
+    
+    func exportBoards() -> String {
+        return boardConfigs.map { config in
+            "\(config.url) | \(config.name) | \(config.isEnabled ? "enabled" : "disabled")"
+        }.joined(separator: "\n")
+    }
+    
+    func importBoards(from content: String) -> (added: Int, failed: [String]) {
+        let lines = content.components(separatedBy: .newlines)
+        var addedCount = 0
+        var failedLines: [String] = []
+        
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            
+            let parts = trimmed.components(separatedBy: " | ")
+            guard parts.count >= 1 else {
+                failedLines.append(line)
+                continue
+            }
+            
+            let url = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            let isEnabled = parts.count > 2 ? parts[2].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "enabled" : true
+            
+            if let config = JobBoardConfig(name: name, url: url, isEnabled: isEnabled) {
+                // Check if already exists
+                if !boardConfigs.contains(where: { $0.url == config.url }) {
+                    addBoardConfig(config)
+                    addedCount += 1
+                }
+            } else {
+                failedLines.append(line)
+            }
+        }
+        
+        return (added: addedCount, failed: failedLines)
+    }
+    
+    // MARK: - Private Methods
+    
     private func fetchJobsFromBoard(_ config: JobBoardConfig, titleFilter: String, locationFilter: String) async throws -> [Job] {
         guard let url = URL(string: config.url) else {
             throw FetchError.invalidURL
@@ -142,6 +186,8 @@ class JobBoardMonitor: ObservableObject {
             return try await ashbyFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
         case .lever:
             return try await leverFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
+        case .workday:
+            return try await workdayFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
         case .workable, .jobvite, .bamboohr, .smartrecruiters, .jazzhr, .recruitee, .breezyhr:
             throw FetchError.notImplemented(config.source.rawValue)
         default:

@@ -80,7 +80,7 @@ struct Job: Identifiable, Codable, Equatable {
         case .tiktok:
             return "Apply on Life at TikTok"
         case .greenhouse, .workable, .jobvite, .lever, .bamboohr,
-             .smartrecruiters, .ashby, .jazzhr, .recruitee, .breezyhr:
+             .smartrecruiters, .ashby, .jazzhr, .recruitee, .breezyhr, .workday:
             return "Apply on Company Website"
         case .snap:
             return "Apply on Snap Careers"
@@ -96,6 +96,7 @@ enum JobSource: String, Codable, CaseIterable {
     case tiktok = "TikTok"
     case snap = "Snap"
     case amd = "AMD"
+    case workday = "Workday"
     case greenhouse = "Greenhouse"
     case workable = "Workable"
     case jobvite = "Jobvite"
@@ -113,6 +114,7 @@ enum JobSource: String, Codable, CaseIterable {
         case .tiktok: return "music.note.tv.fill"
         case .snap: return "camera.fill"
         case .amd: return "cpu.fill"
+        case .workday: return "briefcase.fill"
         case .greenhouse: return "leaf.fill"
         case .workable: return "briefcase.circle.fill"
         case .jobvite: return "person.3.fill"
@@ -132,6 +134,7 @@ enum JobSource: String, Codable, CaseIterable {
         case .tiktok: return .pink
         case .snap: return .yellow
         case .amd: return .red
+        case .workday: return .purple
         case .greenhouse: return .green
         case .workable: return .purple
         case .jobvite: return .orange
@@ -156,6 +159,8 @@ enum JobSource: String, Codable, CaseIterable {
             return .snap
         } else if lowercased.contains("careers.amd.com") {
             return .amd
+        } else if lowercased.contains("myworkdayjobs.com") || lowercased.contains(".wd") {
+            return .workday
         } else if lowercased.contains("greenhouse.io") {
             return .greenhouse
         } else if lowercased.contains("workable.com") {
@@ -316,7 +321,7 @@ class QualificationExtractor {
 extension JobSource {
     var isSupported: Bool {
         switch self {
-        case .microsoft, .tiktok, .greenhouse, .ashby, .lever, .snap, .amd:
+        case .microsoft, .tiktok, .greenhouse, .ashby, .lever, .snap, .amd, .workday:
             return true
         default:
             return false

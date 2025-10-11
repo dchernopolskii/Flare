@@ -53,6 +53,21 @@ struct SidebarView: View {
                 }
                 
                 SidebarButton(
+                    title: "Job Boards",
+                    icon: "globe",
+                    badge: JobBoardMonitor.shared.boardConfigs.filter({ $0.isEnabled }).count > 0 ? "\(JobBoardMonitor.shared.boardConfigs.filter({ $0.isEnabled }).count)" : nil,
+                    isSelected: jobManager.selectedTab == "boards"
+                ) {
+                    jobManager.selectedTab = "boards"
+                    jobManager.selectedJob = nil
+                    if isWindowMinimized {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            sidebarVisible = false
+                        }
+                    }
+                }
+                
+                SidebarButton(
                     title: "Settings",
                     icon: "gear",
                     isSelected: jobManager.selectedTab == "settings"

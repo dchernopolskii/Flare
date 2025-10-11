@@ -14,6 +14,7 @@ import AppKit
 
 struct ContentView: View {
     @EnvironmentObject var jobManager: JobManager
+    @EnvironmentObject var boardMonitor: JobBoardMonitor
     @State private var sidebarVisible = true
     @State private var windowSize: CGSize = .zero
     
@@ -63,6 +64,8 @@ struct ContentView: View {
                                 sidebarVisible: $sidebarVisible,
                                 isWindowMinimized: isWindowMinimized
                             )
+                        } else if jobManager.selectedTab == "boards" {
+                            JobBoardsView()
                         } else {
                             SettingsView()
                         }
