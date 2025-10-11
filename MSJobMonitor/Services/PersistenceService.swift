@@ -7,6 +7,7 @@
 
 
 import Foundation
+import AppKit
 
 actor PersistenceService {
     static let shared = PersistenceService()
@@ -106,5 +107,51 @@ actor PersistenceService {
         let data = try Data(contentsOf: url)
         let ids = try JSONDecoder().decode([String].self, from: data)
         return Set(ids)
+    }
+}
+
+// MARK: - Debug files location
+extension PersistenceService {
+    func getDataDirectoryPath() -> String {
+        return appSupportURL.path
+    }
+    
+    func openDataDirectoryInFinder() {
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: appSupportURL.path)
+    }
+    
+    func getStorageInfo() -> [String: Any] {
+        let fileManager = FileManager.default
+        var info: [String: Any] = [:]
+        
+        info["dataDirectory"] = appSupportURL.path
+        
+        let files = [
+            "jobs.json",
+            "storedIds.json",
+            "appliedJobs.json",
+            "starredJobs.json",
+            "boardConfigs.json",
+            "tiktokJobIds.json",
+            "snapJobTracking.json"
+        ]
+        
+        var fileInfo: [String: String] = [:]
+        for file in files {
+            let url = appSupportURL.appendingPathComponent(file)
+            if fileManager.fileExists(atPath: url.path) {
+                if let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+                   let size = attributes[.size] as? Int64 {
+                    let formatter = ByteCountFormatter()
+                    formatter.countStyle = .file
+                    fileInfo[file] = formatter.string(fromByteCount: size)
+                }
+            } else {
+                fileInfo[file] = "Not created yet"
+            }
+        }
+        
+        info["files"] = fileInfo
+        return info
     }
 }

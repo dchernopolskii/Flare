@@ -153,7 +153,6 @@ struct SettingsView: View {
                         }
                     }
                     
-                    // Statistics Section
                     if jobManager.fetchStatistics.lastFetchTime != nil {
                         SettingsSection(title: "Statistics") {
                             VStack(alignment: .leading, spacing: 8) {
@@ -178,6 +177,48 @@ struct SettingsView: View {
                                     StatRow(label: "Last Updated", value: lastFetch.formatted())
                                 }
                             }
+                            
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Data Storage")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("Data Location:")
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                    }
+                                    
+                                    Text(PersistenceService.shared.getDataDirectoryPath())
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .textSelection(.enabled)
+                                        .padding(8)
+                                        .background(Color(NSColor.controlBackgroundColor))
+                                        .cornerRadius(4)
+                                    
+                                    HStack(spacing: 12) {
+                                        Button("Open in Finder") {
+                                            Task {
+                                                await PersistenceService.shared.openDataDirectoryInFinder()
+                                            }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        
+                                        Button("Copy Path") {
+                                            let pasteboard = NSPasteboard.general
+                                            pasteboard.clearContents()
+                                            pasteboard.setString(PersistenceService.shared.getDataDirectoryPath(), forType: .string)
+                                        }
+                                        .buttonStyle(.bordered)
+                                    }
+                                }
+                                .padding()
+                                .background(Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(8)
+                            }
+
                         }
                     }
                     
@@ -208,6 +249,13 @@ struct SettingsView: View {
                                     .foregroundColor(.green)
                             }
                             .transition(.opacity)
+                        }
+                        Button("Show Data Location") {
+                            let path = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                                .appendingPathComponent("MicrosoftJobMonitor")
+                            
+                            print("📁 Data location: \(path.path)")
+                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path.path)
                         }
                     }
                 }
