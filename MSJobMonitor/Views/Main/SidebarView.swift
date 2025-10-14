@@ -55,7 +55,6 @@ struct SidebarView: View {
                 SidebarButton(
                     title: "Job Boards",
                     icon: "globe",
-                    badge: JobBoardMonitor.shared.boardConfigs.filter({ $0.isEnabled }).count > 0 ? "\(JobBoardMonitor.shared.boardConfigs.filter({ $0.isEnabled }).count)" : nil,
                     isSelected: jobManager.selectedTab == "boards"
                 ) {
                     jobManager.selectedTab = "boards"

@@ -23,14 +23,10 @@ actor WorkdayFetcher: JobFetcherProtocol {
     
     func fetchJobs(from url: URL, titleFilter: String = "", locationFilter: String = "") async throws -> [Job] {
         let config = try extractWorkdayConfig(from: url)
-        
-        print("🔵 [Workday] Detected company: \(config.company), site: \(config.siteName)")
-        
         do {
             let storedJobDates = await loadJobTrackingData(company: config.company)
             let currentDate = Date()
             let session = try await establishSession(config: config, originalURL: url)
-            
             let initialResponse = try await fetchJobsPage(
                 config: config,
                 session: session,
@@ -40,10 +36,10 @@ actor WorkdayFetcher: JobFetcherProtocol {
                 remoteType: nil
             )
         
-        if !initialResponse.facets.isEmpty {
+        if let facets = initialResponse.facets, !facets.isEmpty {
             var allLocationValues: [WorkdayFacetValue] = []
             
-            for facet in initialResponse.facets {
+            for facet in facets {
                 if facet.facetParameter == "locations" {
                     allLocationValues = facet.extractLocationValues()
                     break
@@ -61,17 +57,18 @@ actor WorkdayFetcher: JobFetcherProtocol {
                         count: facetValue.count
                     )
                 }
-                print("🔵 [Workday] Cached \(locationCache[config.cacheKey]?.count ?? 0) locations for \(config.company)")
+                print("🔵 [Workday] ✅ Cached \(locationCache[config.cacheKey]?.count ?? 0) locations for \(config.company)")
+            } else {
+                print("🔵 [Workday] ℹ️ No location facets found for \(config.company)")
             }
+        } else {
+            print("🔵 [Workday] ℹ️ \(config.company) doesn't return facets - will use client-side filtering")
         }
         
         let locationIds = extractLocationIds(
             from: locationFilter,
             company: config.cacheKey
         )
-        if !locationIds.isEmpty {
-            print("🔵 [Workday] Using location IDs: \(locationIds)")
-        }
         
         let titleKeywords = parseFilterString(titleFilter, includeRemote: false)
         let searchText = titleKeywords.joined(separator: " ")
@@ -80,7 +77,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
         let limit = 20
         
         for page in 0..<5 {
-            print("🔵 [Workday] Fetching page \(page + 1) (offset: \(offset))")
             
             let response = try await fetchJobsPage(
                 config: config,
@@ -92,7 +88,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
             )
             
             if response.jobPostings.isEmpty {
-                print("🔵 [Workday] No more jobs at page \(page + 1)")
                 break
             }
             
@@ -103,7 +98,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
             allJobs.append(contentsOf: pageJobs)
             
             if response.jobPostings.count < limit {
-                print("🔵 [Workday] Received fewer than \(limit) jobs, stopping")
                 break
             }
             
@@ -111,7 +105,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
             try await Task.sleep(nanoseconds: 500_000_000)
         }
         
-        // Apply client-side filtering if no location IDs in the API
         let shouldApplyLocationFilter = locationIds.isEmpty && !locationFilter.isEmpty
         
         let filteredJobs: [Job]
@@ -122,16 +115,12 @@ actor WorkdayFetcher: JobFetcherProtocol {
                 titleKeywords: [],
                 locationKeywords: locationKeywords
             )
-            print("🔵 [Workday] Applied client-side location filter")
         } else {
             filteredJobs = allJobs
         }
         
-        print("🔵 [Workday] Fetched \(allJobs.count) jobs, \(filteredJobs.count) after filtering")
-        
             await saveJobTrackingData(filteredJobs, company: config.company, currentDate: currentDate)
             return filteredJobs
-        
         } catch {
             print("🔵 [Workday] ❌ Error in fetchJobs: \(error)")
             print("🔵 [Workday] ❌ Error type: \(type(of: error))")
@@ -146,7 +135,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
     
     private func establishSession(config: WorkdayConfig, originalURL: URL) async throws -> WorkdaySession {
         if let cached = sessionCache[config.cacheKey] {
-            print("🔵 [Workday] Using cached session for \(config.company)")
             return cached
         }
         
@@ -159,34 +147,24 @@ actor WorkdayFetcher: JobFetcherProtocol {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
         
-        print("🔵 [Workday] Establishing session with GET to: \(pageURL)")
-        
         let (_, response) = try await URLSession.shared.data(for: request)
-        
         guard let httpResponse = response as? HTTPURLResponse else {
             print("🔵 [Workday] ❌ Invalid session response")
             throw FetchError.invalidResponse
         }
         
-        print("🔵 [Workday] Session response status: \(httpResponse.statusCode)")
-        
         var cookies: [String] = []
         var csrfToken: String?
         
         if let headerFields = httpResponse.allHeaderFields as? [String: String] {
-            print("🔵 [Workday] Session response headers: \(headerFields)")
-            
             let url = httpResponse.url ?? originalURL
             let cookieArray = HTTPCookie.cookies(withResponseHeaderFields: headerFields, for: url)
             
-            print("🔵 [Workday] Extracted \(cookieArray.count) cookies:")
             for cookie in cookieArray {
-                print("🔵 [Workday]   - \(cookie.name) = \(cookie.value.prefix(20))...")
                 cookies.append("\(cookie.name)=\(cookie.value)")
                 
                 if cookie.name == "CALYPSO_CSRF_TOKEN" {
                     csrfToken = cookie.value
-                    print("🔵 [Workday]   ✅ Found CSRF token")
                 }
             }
         }
@@ -197,10 +175,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
         )
         
         sessionCache[config.cacheKey] = session
-        
-        print("🔵 [Workday] Session established - Cookies: \(cookies.count), CSRF: \(csrfToken != nil)")
-        print("🔵 [Workday] Cookie string length: \(session.cookies.count) chars")
-        
         return session
     }
     
@@ -262,20 +236,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
         
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
-        if offset == 0 {
-            print("🔵 [Workday] POST to: \(url)")
-            if let bodyData = request.httpBody, let bodyString = String(data: bodyData, encoding: .utf8) {
-                print("🔵 [Workday] Body: \(bodyString)")
-            }
-            print("🔵 [Workday] Request headers:")
-            if let headers = request.allHTTPHeaderFields {
-                for (key, value) in headers {
-                    let displayValue = key == "Cookie" ? "\(value.prefix(100))..." : value
-                    print("🔵 [Workday]   \(key): \(displayValue)")
-                }
-            }
-        }
-        
         let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -283,32 +243,20 @@ actor WorkdayFetcher: JobFetcherProtocol {
             throw FetchError.invalidResponse
         }
         
-        print("🔵 [Workday] Response status: \(httpResponse.statusCode)")
-        
-        if let headers = httpResponse.allHeaderFields as? [String: String] {
-            print("🔵 [Workday] Response headers: \(headers)")
-        }
-        
         guard httpResponse.statusCode == 200 else {
             if let errorString = String(data: data, encoding: .utf8) {
-                print("🔵 [Workday] ❌ Error response body: \(errorString)")
+                print("🔵 [Workday] ❌ Error response body: \(errorString.prefix(200))")
             }
             throw FetchError.httpError(httpResponse.statusCode)
         }
         
-        if let responseString = String(data: data, encoding: .utf8) {
-            let preview = responseString.prefix(500)
-            print("🔵 [Workday] ✅ Response preview: \(preview)...")
-        }
-        
         do {
             let decoded = try JSONDecoder().decode(WorkdayResponse.self, from: data)
-            print("🔵 [Workday] ✅ Decoded \(decoded.jobPostings.count) jobs, \(decoded.facets.count) facets")
             return decoded
         } catch {
             print("🔵 [Workday] ❌ JSON decode error: \(error)")
             if let responseString = String(data: data, encoding: .utf8) {
-                print("🔵 [Workday] Full response: \(responseString)")
+                print("🔵 [Workday] Response preview: \(responseString.prefix(500))")
             }
             throw FetchError.parsingFailed
         }
@@ -325,6 +273,7 @@ actor WorkdayFetcher: JobFetcherProtocol {
         let jobURL = "https://\(config.company).\(config.instance).myworkdayjobs.com/en-US/\(config.siteName)/details/\(titleSlug)_\(jobId)"
         
         let postingDate = parsePostedDate(workdayJob.postedOn)
+        
         let fullJobId = "workday-\(jobId)"
         let firstSeenDate = storedJobDates[fullJobId] ?? currentDate
         
@@ -383,10 +332,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
             }
             
             locationIds.append(contentsOf: matches.map { $0.id })
-            
-            if !matches.isEmpty {
-                print("🔵 [Workday] Keyword '\(keyword)' matched: \(matches.map { $0.descriptor })")
-            }
         }
         
         return locationIds
@@ -466,7 +411,6 @@ actor WorkdayFetcher: JobFetcherProtocol {
                 dict[item.id] = item.firstSeenDate
             }
             
-            print("🔵 [Workday] Loaded \(dict.count) tracked job dates for \(company)")
             return dict
         } catch {
             return [:]
@@ -489,12 +433,9 @@ actor WorkdayFetcher: JobFetcherProtocol {
             let trackingData = existingData.map { JobTrackingData(id: $0.key, firstSeenDate: $0.value) }
             let cutoffDate = Date().addingTimeInterval(-60 * 24 * 3600)
             let recentData = trackingData.filter { $0.firstSeenDate > cutoffDate }
-            
             let data = try JSONEncoder().encode(recentData)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url)
-            
-            print("🔵 [Workday] Saved \(recentData.count) tracked job dates for \(company)")
         } catch {
             print("🔵 [Workday] Failed to save job tracking data: \(error)")
         }
@@ -533,7 +474,7 @@ struct WorkdayLocation: Codable {
 struct WorkdayResponse: Codable {
     let total: Int
     let jobPostings: [WorkdayJobPosting]
-    let facets: [WorkdayFacet]
+    let facets: [WorkdayFacet]?
 }
 
 struct WorkdayJobPosting: Codable {

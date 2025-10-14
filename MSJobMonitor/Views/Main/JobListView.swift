@@ -218,15 +218,7 @@ struct JobListHeader: View {
                         Label(sourceFilterLabel, systemImage: "line.3.horizontal.decrease.circle")
                     }
                 }
-                
-                Button(action: {
-                    boardMonitor.showConfigSheet = true
-                }) {
-                    Label("Job Boards", systemImage: "gear")
-                }
-                .sheet(isPresented: $boardMonitor.showConfigSheet) {
-                    JobBoardConfigSheet()
-                }
+        
                 
                 Button(action: {
                     Task { await jobManager.fetchAllJobs() }

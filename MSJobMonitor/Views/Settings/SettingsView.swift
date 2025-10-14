@@ -250,13 +250,6 @@ struct SettingsView: View {
                             }
                             .transition(.opacity)
                         }
-                        Button("Show Data Location") {
-                            let path = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                                .appendingPathComponent("MicrosoftJobMonitor")
-                            
-                            print("📁 Data location: \(path.path)")
-                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path.path)
-                        }
                     }
                 }
                 .padding()
