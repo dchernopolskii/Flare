@@ -7,7 +7,6 @@
 
 import Foundation
 
-// MARK: - TikTok Job Fetcher
 actor TikTokJobFetcher: JobFetcherProtocol {
     private let apiURL = URL(string: "https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts")!
     private let pageSize = 12
@@ -32,7 +31,17 @@ actor TikTokJobFetcher: JobFetcherProtocol {
                     break
                 }
                 
-                let converted = pageJobs.compactMap { tikTokJob -> Job? in
+                let converted = pageJobs.enumerated().compactMap { (index, tikTokJob) -> Job? in
+                    guard !tikTokJob.title.isEmpty else {
+                        print("🎵 [TikTok] ⚠️ Skipping job at index \(index): empty title")
+                        return nil
+                    }
+                    
+                    guard !tikTokJob.id.isEmpty else {
+                        print("🎵 [TikTok] ⚠️ Skipping job at index \(index): empty ID")
+                        return nil
+                    }
+                    
                     let locationString = buildLocationString(from: tikTokJob.city_info)
                     let isNewJob = !storedJobIds.contains("tiktok-\(tikTokJob.id)")
                     let firstSeenDate = isNewJob ? currentDate : Date().addingTimeInterval(-3600 * 25)
@@ -63,10 +72,17 @@ actor TikTokJobFetcher: JobFetcherProtocol {
                 pageNumber += 1
                 
                 try await Task.sleep(nanoseconds: 300_000_000)
+            } catch let error as FetchError {
+                print("🎵 [TikTok] ❌ Fetch error on page \(pageNumber): \(error.errorDescription ?? "Unknown")")
+                throw error
             } catch {
-                print("🎵 [TikTok] Error fetching page \(pageNumber): \(error)")
-                break
+                print("🎵 [TikTok] ❌ Unexpected error on page \(pageNumber): \(error)")
+                throw FetchError.networkError(error)
             }
+        }
+        
+        guard !allJobs.isEmpty else {
+            throw FetchError.noJobs
         }
         
         await saveNewTikTokJobIds(allJobs.map { $0.id })
@@ -76,7 +92,6 @@ actor TikTokJobFetcher: JobFetcherProtocol {
     private func fetchJobsPage(titleKeywords: [String], locationCodes: [String], offset: Int) async throws -> [TikTokJob] {
         var request = URLRequest(url: apiURL)
         request.httpMethod = "POST"
-        
         request.setValue("*/*", forHTTPHeaderField: "accept")
         request.setValue("en-US", forHTTPHeaderField: "accept-language")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
@@ -94,25 +109,36 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         
         let jsonData = try JSONSerialization.data(withJSONObject: body)
         request.httpBody = jsonData
+        
         let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw FetchError.invalidResponse
         }
+        
         guard httpResponse.statusCode == 200 else {
-            throw FetchError.httpError(httpResponse.statusCode)
+            throw FetchError.httpError(statusCode: httpResponse.statusCode)
         }
         
-        let decoded = try JSONDecoder().decode(TikTokAPIResponse.self, from: data)
+        let decoded: TikTokAPIResponse
+        do {
+            decoded = try JSONDecoder().decode(TikTokAPIResponse.self, from: data)
+        } catch {
+            let preview = String(data: data, encoding: .utf8)?.prefix(200) ?? "Unable to preview"
+            print("🎵 [TikTok] ❌ Decoding error: \(error)")
+            print("🎵 [TikTok] Response preview: \(preview)")
+            throw FetchError.decodingError(details: "Failed to decode TikTok response: \(error.localizedDescription)")
+        }
+        
         guard decoded.code == 0 else {
-            throw FetchError.apiError("TikTok returned code \(decoded.code)")
+            throw FetchError.apiError("TikTok API returned error code \(decoded.code)")
         }
         
         return decoded.data.job_post_list
     }
     
     private func buildRequestBody(titleKeywords: [String], locationCodes: [String], offset: Int) -> [String: Any] {
-        var body: [String: Any] = [
+        return [
             "recruitment_id_list": ["1"],
             "job_category_id_list": [],
             "subject_id_list": [],
@@ -121,8 +147,6 @@ actor TikTokJobFetcher: JobFetcherProtocol {
             "limit": pageSize,
             "offset": offset
         ]
-        
-        return body
     }
     
     // MARK: - Helpers
@@ -155,7 +179,7 @@ actor TikTokJobFetcher: JobFetcherProtocol {
         return nil
     }
     
-    // MARK: - Persistence
+    // MARK: - Persistence (keep existing implementation)
     private func loadStoredTikTokJobIds() async -> Set<String> {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MicrosoftJobMonitor")
@@ -189,7 +213,7 @@ actor TikTokJobFetcher: JobFetcherProtocol {
     }
 }
 
-// MARK: - TikTok API Models
+// MARK: - Models
 struct TikTokAPIResponse: Codable {
     let code: Int
     let data: TikTokData
@@ -220,36 +244,4 @@ final class TikTokCityInfo: Codable {
     let code: String
     let en_name: String?
     var parent: TikTokCityInfo?
-}
-
-// MARK: - Job Fetcher Protocol
-protocol JobFetcherProtocol {
-    func fetchJobs(titleKeywords: [String], location: String, maxPages: Int) async throws -> [Job]
-}
-
-// MARK: - Fetch Error
-enum FetchError: LocalizedError {
-    case invalidURL
-    case invalidResponse
-    case parsingFailed
-    case httpError(Int)
-    case apiError(String)
-    case notImplemented(String)
-    
-    var errorDescription: String? {
-        switch self {
-        case .invalidURL:
-            return "Invalid URL"
-        case .invalidResponse:
-            return "Failed to fetch job listings"
-        case .parsingFailed:
-            return "Failed to parse job data"
-        case .httpError(let code):
-            return "HTTP Error: \(code)"
-        case .apiError(let message):
-            return "API Error: \(message)"
-        case .notImplemented(let platform):
-            return "\(platform) integration coming soon"
-        }
-    }
 }

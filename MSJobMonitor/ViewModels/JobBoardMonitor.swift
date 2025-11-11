@@ -110,6 +110,7 @@ class JobBoardMonitor: ObservableObject {
         isMonitoring = true
         lastError = nil
         var allJobs: [Job] = []
+        var errorMessages: [String] = []
         
         for config in boardConfigs where config.isEnabled && config.isSupported {
             do {
@@ -121,10 +122,17 @@ class JobBoardMonitor: ObservableObject {
                 updateBoardConfig(updatedConfig)
                 
             } catch {
-                lastError = "Failed to fetch from \(config.displayName): \(error.localizedDescription)"
+                let errorMsg = "\(config.displayName): \(error.localizedDescription)"
+                errorMessages.append(errorMsg)
+                print("🌐 [JobBoard] ❌ \(errorMsg)")
             }
             
             try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        
+        // Set combined error message if any boards failed
+        if !errorMessages.isEmpty {
+            lastError = errorMessages.joined(separator: " • ")
         }
         
         isMonitoring = false

@@ -25,7 +25,7 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
         var searchCombinations: [(title: String, country: String)] = []
         
         if titles.isEmpty && targetCountries.isEmpty {
-            searchCombinations.append(("", "United States")) // Default
+            searchCombinations.append(("", "United States"))
         } else if titles.isEmpty {
             for country in targetCountries {
                 searchCombinations.append(("", country))
@@ -108,9 +108,15 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
             }
             
             let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-                break
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("🪟 [Microsoft] ❌ Invalid response object")
+                throw FetchError.invalidResponse
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                print("🪟 [Microsoft] ❌ HTTP error: \(httpResponse.statusCode)")
+                throw FetchError.httpError(statusCode: httpResponse.statusCode)
             }
             
             let pageJobs = try parseResponse(data, targetCountry: country)
@@ -130,11 +136,36 @@ actor MicrosoftJobFetcher: JobFetcherProtocol {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         
-        let response = try decoder.decode(MSResponse.self, from: data)
+        let response: MSResponse
+        do {
+            response = try decoder.decode(MSResponse.self, from: data)
+        } catch let DecodingError.keyNotFound(key, context) {
+            print("🪟 [Microsoft] ❌ Missing key '\(key.stringValue)' at: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🪟 [Microsoft] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Missing field '\(key.stringValue)' in Microsoft response")
+        } catch {
+            print("🪟 [Microsoft] ❌ Decoding error: \(error)")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🪟 [Microsoft] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Failed to decode Microsoft response: \(error.localizedDescription)")
+        }
         
         var jobs: [Job] = []
         
-        for msJob in response.operationResult.result.jobs {
+        for (index, msJob) in response.operationResult.result.jobs.enumerated() {
+            guard !msJob.title.isEmpty else {
+                print("🪟 [Microsoft] ⚠️ Skipping job at index \(index): empty title")
+                continue
+            }
+            
+            guard !msJob.jobId.isEmpty else {
+                print("🪟 [Microsoft] ⚠️ Skipping job '\(msJob.title)' at index \(index): empty jobId")
+                continue
+            }
+            
             let jobLocations = msJob.properties?.locations ?? []
             let primaryLocation = msJob.properties?.primaryLocation ?? ""
             

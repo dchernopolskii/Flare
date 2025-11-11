@@ -58,7 +58,6 @@ struct JobRow: View {
                 
                 // Job Info
                 VStack(alignment: .leading, spacing: 4) {
-                    // Title and Badges
                     HStack {
                         Text(job.title)
                             .font(.headline)

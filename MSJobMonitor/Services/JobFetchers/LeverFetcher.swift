@@ -14,22 +14,65 @@ actor LeverFetcher: JobFetcherProtocol {
     
     func fetchJobs(from url: URL, titleFilter: String = "", locationFilter: String = "") async throws -> [Job] {
         let slug = extractLeverSlug(from: url)
-        guard let apiURL = URL(string: "https://jobs.lever.co/\(slug)?mode=json") else {
+        guard let apiURL = URL(string: "https://api.lever.co/v0/postings/\(slug)?mode=json") else {
             throw FetchError.invalidURL
         }
         
         let (data, response) = try await URLSession.shared.data(from: apiURL)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            print("🎚️ [Lever] ❌ Invalid response object")
             throw FetchError.invalidResponse
         }
         
-        let decoded = try JSONDecoder().decode([LeverJob].self, from: data)
+        guard httpResponse.statusCode == 200 else {
+            print("🎚️ [Lever] ❌ HTTP error: \(httpResponse.statusCode)")
+            if let errorString = String(data: data, encoding: .utf8) {
+                print("🎚️ [Lever] Response preview: \(errorString.prefix(200))")
+            }
+            throw FetchError.httpError(statusCode: httpResponse.statusCode)
+        }
+        
+        let decoded: [LeverJob]
+        do {
+            decoded = try JSONDecoder().decode([LeverJob].self, from: data)
+        } catch let DecodingError.keyNotFound(key, context) {
+            print("🎚️ [Lever] ❌ Missing key '\(key.stringValue)' at: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🎚️ [Lever] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Missing field '\(key.stringValue)' in Lever response")
+        } catch {
+            print("🎚️ [Lever] ❌ Decoding error: \(error)")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🎚️ [Lever] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Failed to decode Lever response: \(error.localizedDescription)")
+        }
+        
+        guard !decoded.isEmpty else {
+            throw FetchError.noJobs
+        }
         
         let titleKeywords = parseFilterString(titleFilter)
         let locationKeywords = parseFilterString(locationFilter)
         
-        
-        return decoded.compactMap { job -> Job? in
+        return decoded.enumerated().compactMap { (index, job) -> Job? in
+            guard !job.text.isEmpty else {
+                print("🎚️ [Lever] ⚠️ Skipping job at index \(index): empty title")
+                return nil
+            }
+            
+            guard !job.id.isEmpty else {
+                print("🎚️ [Lever] ⚠️ Skipping job '\(job.text)' at index \(index): empty ID")
+                return nil
+            }
+            
+            guard !job.hostedUrl.isEmpty else {
+                print("🎚️ [Lever] ⚠️ Skipping job '\(job.text)' at index \(index): empty URL")
+                return nil
+            }
+            
             let location = job.categories.location ?? "Location not specified"
             let title = job.text
             

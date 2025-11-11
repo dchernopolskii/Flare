@@ -56,7 +56,7 @@ actor GreenhouseFetcher: JobFetcherProtocol {
         if httpResponse.statusCode != 200 {
             if let errorString = String(data: data, encoding: .utf8) {
             }
-            throw FetchError.httpError(httpResponse.statusCode)
+            throw FetchError.httpError(statusCode: httpResponse.statusCode)
         }
         
         do {
@@ -73,7 +73,17 @@ actor GreenhouseFetcher: JobFetcherProtocol {
             
             print("🌱 [Greenhouse] Applying filters - Title keywords: \(titleKeywords), Location keywords: \(locationKeywords)")
 
-            let jobs = decoded.jobs.compactMap { ghJob -> Job? in
+            let jobs = decoded.jobs.enumerated().compactMap { (index, ghJob) -> Job? in
+                guard !ghJob.title.isEmpty else {
+                    print("🌱 [Greenhouse] âš ï¸ Skipping job at index \(index): empty title")
+                    return nil
+                }
+                
+                guard !ghJob.absolute_url.isEmpty else {
+                    print("🌱 [Greenhouse] âš ï¸ Skipping job '\(ghJob.title)' at index \(index): empty URL")
+                    return nil
+                }
+                
                 var postingDate = Date()
                 if let dateString = ghJob.updated_at {
                     postingDate = formatter.date(from: dateString)
@@ -97,7 +107,6 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                     }
                     if !titleMatches {
                         print("🌱 [Greenhouse] Filtered out by title: '\(title)' doesn't match any of \(titleKeywords)")
-
                         return nil
                     }
                 }
@@ -108,7 +117,6 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                     }
                     if !locationMatches {
                         print("🌱 [Greenhouse] Filtered out by location: '\(location)' doesn't match any of \(locationKeywords)")
-
                         return nil
                     }
                 }
@@ -130,12 +138,22 @@ actor GreenhouseFetcher: JobFetcherProtocol {
                     firstSeenDate: Date()
                 )
             }
-            print("🌱 [Greenhouse] Parsed \(jobs.count) jobs from API (after filtering)")
+            print("🌱  [Greenhouse] Parsed \(jobs.count) jobs from API (after filtering)")
 
             return jobs
             
+        } catch let DecodingError.keyNotFound(key, context) {
+            print("🌱  [Greenhouse] ❌ Missing key '\(key.stringValue)' at: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🌱 [Greenhouse] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Missing field '\(key.stringValue)' in Greenhouse response")
         } catch {
-            throw FetchError.parsingFailed
+            print("🌱 [Greenhouse] ❌ Decoding error: \(error)")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🌱 [Greenhouse] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Failed to decode Greenhouse response: \(error.localizedDescription)")
         }
     }
     

@@ -11,12 +11,9 @@ actor AMDFetcher: JobFetcherProtocol {
     private let baseURL = "https://careers.amd.com/api/jobs"
     
     func fetchJobs(titleKeywords: [String], location: String, maxPages: Int) async throws -> [Job] {
-        
         let safeMaxPages = max(1, min(maxPages, 20))
-        
         var allJobs: [Job] = []
         let pageSize = 20
-        
         let locationQuery = parseLocationForAMD(location)
         
         for page in 1...safeMaxPages {
@@ -89,31 +86,68 @@ actor AMDFetcher: JobFetcherProtocol {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 15
         
-        if page == 1 {
-        }
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(from: components.url!)
         
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("🔴”´ [AMD] ❌ Invalid response object")
             throw FetchError.invalidResponse
         }
         
         guard httpResponse.statusCode == 200 else {
+            print("🔴”´ [AMD] ❌ HTTP error: \(httpResponse.statusCode)")
             if let errorString = String(data: data, encoding: .utf8) {
+                print("🔴”´ [AMD] Response preview: \(errorString.prefix(200))")
             }
-            throw FetchError.httpError(httpResponse.statusCode)
+            throw FetchError.httpError(statusCode: httpResponse.statusCode)
         }
         
+        // Better error handling for decoding
         let decoder = JSONDecoder()
-        let amdResponse = try decoder.decode(AMDResponse.self, from: data)
+        let amdResponse: AMDResponse
+        do {
+            amdResponse = try decoder.decode(AMDResponse.self, from: data)
+        } catch let DecodingError.keyNotFound(key, context) {
+            print("🔴”´ [AMD] ❌ Missing key '\(key.stringValue)' at: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🔴”´ [AMD] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Missing field '\(key.stringValue)' in AMD response")
+        } catch {
+            print("🔴”´ [AMD] ❌ Decoding error: \(error)")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🔴”´ [AMD] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Failed to decode AMD response: \(error.localizedDescription)")
+        }
         
-        let jobs = amdResponse.jobs.compactMap { convertAMDJob($0) }
+        // Convert jobs with validation
+        let jobs = amdResponse.jobs.enumerated().compactMap { (index, amdJobWrapper) -> Job? in
+            convertAMDJob(amdJobWrapper, index: index)
+        }
         
         return jobs
     }
     
-    private func convertAMDJob(_ amdJob: AMDJobWrapper) -> Job? {
-        let jobData = amdJob.data
+    // Updated conversion with validation
+    private func convertAMDJob(_ amdJobWrapper: AMDJobWrapper, index: Int) -> Job? {
+        let jobData = amdJobWrapper.data
+        
+        // Validate required fields
+        guard !jobData.title.isEmpty else {
+            print("🔴”´ [AMD] âš ï¸ Skipping job at index \(index): empty title")
+            return nil
+        }
+        
+        guard !jobData.slug.isEmpty else {
+            print("🔴”´ [AMD] âš ï¸ Skipping job '\(jobData.title)' at index \(index): empty slug")
+            return nil
+        }
+        
+        guard !jobData.req_id.isEmpty else {
+            print("🔴”´ [AMD] âš ï¸ Skipping job '\(jobData.title)' at index \(index): empty req_id")
+            return nil
+        }
+        
         let location = buildLocationString(from: jobData)
         let postingDate = parseAMDDate(jobData.posted_date)
         let jobURL = "https://careers.amd.com/careers-home/jobs/\(jobData.req_id)?lang=en-us"
@@ -230,7 +264,7 @@ actor AMDFetcher: JobFetcherProtocol {
     }
 }
 
-// MARK: - AMD API Models
+// MARK: - AMD API Models (unchanged)
 
 struct AMDResponse: Codable {
     let jobs: [AMDJobWrapper]

@@ -26,7 +26,7 @@ actor SnapFetcher: JobFetcherProtocol {
         
         await saveJobTrackingData(filteredJobs, currentDate: currentDate)
         
-        print("👻 [Snap] Fetched \(jobs.count) total jobs, \(filteredJobs.count) after filtering")
+        print("👻‘» [Snap] Fetched \(jobs.count) total jobs, \(filteredJobs.count) after filtering")
         return filteredJobs
     }
     
@@ -49,7 +49,7 @@ actor SnapFetcher: JobFetcherProtocol {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 15
         
-        print("👻 [Snap] Fetching from: \(url)")
+        print("👻‘» [Snap] Fetching from: \(url)")
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
@@ -59,14 +59,39 @@ actor SnapFetcher: JobFetcherProtocol {
         
         guard httpResponse.statusCode == 200 else {
             if let errorString = String(data: data, encoding: .utf8) {
+                print("👻[Snap] Error response: \(errorString.prefix(200))")
             }
-            throw FetchError.httpError(httpResponse.statusCode)
+            throw FetchError.httpError(statusCode: httpResponse.statusCode)
         }
         
-        let decoded = try JSONDecoder().decode(SnapResponse.self, from: data)
+        let decoded: SnapResponse
+        do {
+            decoded = try JSONDecoder().decode(SnapResponse.self, from: data)
+        } catch let DecodingError.keyNotFound(key, context) {
+            print("👻‘» [Snap] ❌ Missing key '\(key.stringValue)' at: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("👻‘» [Snap] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Missing field '\(key.stringValue)' in Snap response")
+        } catch {
+            print("👻‘» [Snap] ❌ Decoding error: \(error)")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("👻‘» [Snap] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Failed to decode Snap response: \(error.localizedDescription)")
+        }
         
-        let jobs = decoded.body.compactMap { snapJob -> Job? in
-            guard let source = snapJob._source else { return nil }
+        let jobs = decoded.body.enumerated().compactMap { (index, snapJob) -> Job? in
+            guard let source = snapJob._source else {
+                print("👻‘» [Snap] âš ï¸ Skipping job at index \(index): missing _source")
+                return nil
+            }
+            
+            let title = source.title ?? "Untitled Position"
+            guard !title.isEmpty else {
+                print("👻‘» [Snap] âš ï¸ Skipping job at index \(index): empty title")
+                return nil
+            }
             
             let locationString = buildLocationString(from: source)
             
@@ -82,7 +107,7 @@ actor SnapFetcher: JobFetcherProtocol {
             
             return Job(
                 id: jobId,
-                title: source.title ?? "Untitled Position",
+                title: title,
                 location: locationString,
                 postingDate: nil,
                 url: jobURL,

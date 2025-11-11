@@ -181,9 +181,11 @@ class JobManager: ObservableObject {
         newJobsCount = 0
         fetchStatistics = FetchStatistics()
         
+        var errorMessages: [String] = []
         var allNewJobs: [Job] = []
         var sourceJobsMap: [JobSource: [Job]] = [:]
         
+        // Microsoft
         if enableMicrosoft {
             do {
                 let jobs = try await fetchFromSource(.microsoft)
@@ -192,7 +194,9 @@ class JobManager: ObservableObject {
                 allNewJobs.append(contentsOf: newJobs)
                 fetchStatistics.microsoftJobs = jobs.count
             } catch {
-                lastError = "Microsoft: \(error.localizedDescription)"
+                print("🔵 [Microsoft] ❌ Error: \(error)")
+                errorMessages.append("Microsoft: \(error.localizedDescription)")
+                
                 if let existingJobs = jobsBySource[.microsoft] {
                     sourceJobsMap[.microsoft] = existingJobs
                 }
@@ -201,6 +205,7 @@ class JobManager: ObservableObject {
             sourceJobsMap[.microsoft] = []
         }
         
+        // TikTok
         if enableTikTok {
             do {
                 let jobs = try await fetchFromSource(.tiktok)
@@ -209,7 +214,9 @@ class JobManager: ObservableObject {
                 allNewJobs.append(contentsOf: newJobs)
                 fetchStatistics.tiktokJobs = jobs.count
             } catch {
-                lastError = "TikTok: \(error.localizedDescription)"
+                print("🔵 [TikTok] ❌ Error: \(error)")
+                errorMessages.append("TikTok: \(error.localizedDescription)")
+                
                 if let existingJobs = jobsBySource[.tiktok] {
                     sourceJobsMap[.tiktok] = existingJobs
                 }
@@ -218,6 +225,7 @@ class JobManager: ObservableObject {
             sourceJobsMap[.tiktok] = []
         }
         
+        // Snap
         if enableSnap {
             do {
                 let jobs = try await fetchFromSource(.snap)
@@ -225,7 +233,9 @@ class JobManager: ObservableObject {
                 let newJobs = filterNewJobs(jobs)
                 allNewJobs.append(contentsOf: newJobs)
             } catch {
-                lastError = "Snap: \(error.localizedDescription)"
+                print("🔵 [Snap] ❌ Error: \(error)")
+                errorMessages.append("Snap: \(error.localizedDescription)")
+                
                 if let existingJobs = jobsBySource[.snap] {
                     sourceJobsMap[.snap] = existingJobs
                 }
@@ -234,15 +244,18 @@ class JobManager: ObservableObject {
             sourceJobsMap[.snap] = []
         }
         
+        // AMD
         if enableAMD {
             do {
                 let jobs = try await fetchFromSource(.amd)
                 sourceJobsMap[.amd] = jobs
                 let newJobs = filterNewJobs(jobs)
-                allJobs.append(contentsOf: newJobs)
+                allNewJobs.append(contentsOf: newJobs)
                 fetchStatistics.amdJobs = jobs.count
             } catch {
-                lastError = "AMD: \(error.localizedDescription)"
+                print("🔵 [AMD] ❌ Error: \(error)")
+                errorMessages.append("AMD: \(error.localizedDescription)")
+                
                 if let existingJobs = jobsBySource[.amd] {
                     sourceJobsMap[.amd] = existingJobs
                 }
@@ -251,25 +264,24 @@ class JobManager: ObservableObject {
             sourceJobsMap[.amd] = []
         }
         
+        // Custom Boards
         if enableCustomBoards {
-            let boardJobs = await JobBoardMonitor.shared.fetchAllBoardJobs(
-                titleFilter: jobTitleFilter,
-                locationFilter: locationFilter
-            )
+            let customJobs = await JobBoardMonitor.shared.fetchAllBoardJobs()
+            let newJobs = filterNewJobs(customJobs)
+            allNewJobs.append(contentsOf: newJobs)
+            fetchStatistics.customBoardJobs = customJobs.count
             
-            for job in boardJobs {
-                if sourceJobsMap[job.source] == nil {
-                    sourceJobsMap[job.source] = []
-                }
-                sourceJobsMap[job.source]?.append(job)
+            // Check if any boards had errors
+            if let boardError = await JobBoardMonitor.shared.lastError {
+                errorMessages.append(boardError)
             }
-            
-            let newBoardJobs = filterNewJobs(boardJobs)
-            allNewJobs.append(contentsOf: newBoardJobs)
-            fetchStatistics.customBoardJobs = boardJobs.count
         }
         
-        jobsBySource = sourceJobsMap
+        // Set accumulated error message if any fetchers failed
+        if !errorMessages.isEmpty {
+            lastError = errorMessages.joined(separator: " • ")
+        }
+        
         await processNewJobs(allNewJobs, sourceJobsMap: sourceJobsMap)
         isLoading = false
     }
@@ -348,7 +360,7 @@ class JobManager: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             guard let self = self else { return }
-            print("💤 Mac woke up - triggering job refresh")
+            print("🎚️¤ Mac woke up - triggering job refresh")
             Task {
                 await self.fetchAllJobs()
             }

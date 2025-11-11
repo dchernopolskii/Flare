@@ -95,7 +95,7 @@ struct JobBoardsView: View {
                 if result.failed.isEmpty {
                     importResult = "✅ Imported \(result.added) boards successfully!"
                 } else {
-                    importResult = "⚠️ Imported \(result.added) boards, \(result.failed.count) failed"
+                    importResult = "âš ï¸ Imported \(result.added) boards, \(result.failed.count) failed"
                 }
             } catch {
                 importResult = "❌ Import failed: \(error.localizedDescription)"
@@ -155,15 +155,15 @@ struct ImportExportSection: View {
                 HStack {
                     Text(result)
                         .font(.callout)
-                        .foregroundColor(result.hasPrefix("✅") ? .green : result.hasPrefix("⚠️") ? .orange : .red)
+                        .foregroundColor(result.hasPrefix("✅") ? .green : result.hasPrefix("âš ï¸") ? .orange : .red)
                     Spacer()
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(result.hasPrefix("✅") ? Color.green.opacity(0.1) : 
-                              result.hasPrefix("⚠️") ? Color.orange.opacity(0.1) : 
+                        .fill(result.hasPrefix("✅") ? Color.green.opacity(0.1) :
+                              result.hasPrefix("âš ï¸") ? Color.orange.opacity(0.1) :
                               Color.red.opacity(0.1))
                 )
             }
@@ -184,15 +184,33 @@ struct AddBoardSection: View {
     @Binding var newBoardName: String
     @Binding var newBoardURL: String
     @Binding var testingBoardId: UUID?
+    @State private var isDetecting = false
+    @State private var detectionResult: ATSDetectorService.DetectionResult?
+    @State private var urlToUse: String = ""
     @StateObject private var monitor = JobBoardMonitor.shared
     @EnvironmentObject var jobManager: JobManager
     
     private var detectedSource: JobSource? {
-        JobSource.detectFromURL(newBoardURL)
+        JobSource.detectFromURL(urlToUse.isEmpty ? newBoardURL : urlToUse)
     }
     
-    private var isValidBoard: Bool {
-        !newBoardURL.isEmpty && detectedSource != nil && (detectedSource?.isSupported ?? false)
+    private var isDirectATSLink: Bool {
+        guard !newBoardURL.isEmpty else { return false }
+        return JobSource.detectFromURL(newBoardURL) != nil
+    }
+    
+    private var canAddBoard: Bool {
+        if isDirectATSLink {
+            // Direct ATS link - can add immediately
+            return detectedSource?.isSupported ?? false
+        } else {
+            // Not a direct link - need to detect first and have a valid detected URL
+            return !urlToUse.isEmpty && detectedSource?.isSupported ?? false
+        }
+    }
+    
+    private var needsDetection: Bool {
+        !isDirectATSLink && urlToUse.isEmpty
     }
     
     var body: some View {
@@ -203,31 +221,120 @@ struct AddBoardSection: View {
             TextField("Board Name (e.g., GitLab, Stripe)", text: $newBoardName)
                 .textFieldStyle(.roundedBorder)
             
-            VStack(alignment: .leading, spacing: 4) {
-                TextField("Board URL (job listing page)", text: $newBoardURL)
-                    .textFieldStyle(.roundedBorder)
-                
-                if !newBoardURL.isEmpty {
-                    SourceDetectionBadge(source: detectedSource)
+            TextField("Board URL (job listing page)", text: $newBoardURL)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: newBoardURL) { _ in
+                    // Reset detection when URL changes
+                    detectionResult = nil
+                    urlToUse = ""
                 }
+            
+            if let result = detectionResult {
+                DetectionResultView(result: result)
+                
+                if let atsUrl = result.actualATSUrl, atsUrl != newBoardURL {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Detected ATS URL", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                            .fontWeight(.semibold)
+                        
+                        Text(atsUrl)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(4)
+                        
+                        Text("✓ This URL will be used for the job board")
+                            .font(.caption2)
+                            .foregroundColor(.green)
+                            .fontWeight(.semibold)
+                    }
+                    .padding()
+                    .background(Color.green.opacity(0.05))
+                    .cornerRadius(8)
+                }
+            }
+            
+            // Status message for direct ATS links
+            if isDirectATSLink, let source = detectedSource {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Direct \(source.rawValue) link detected - ready to add")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                        .fontWeight(.medium)
+                    if !source.isSupported {
+                        Text("(Coming soon)")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.green.opacity(0.1))
+                .cornerRadius(6)
             }
             
             Text("Currently supported: Greenhouse, Ashbyhq, Lever, Workday • Coming soon: Workable, Jobvite, and more")
                 .font(.caption)
                 .foregroundColor(.secondary)
             
-            HStack {
-                Button("Add & Test Board") {
-                    addBoard()
+            // Action buttons
+            HStack(spacing: 12) {
+                // Detect ATS button
+                if needsDetection {
+                    Button(action: detectATS) {
+                        HStack {
+                            if isDetecting {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Detecting...")
+                            } else {
+                                Image(systemName: "magnifyingglass.circle.fill")
+                                Text("Detect ATS")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(newBoardURL.isEmpty || isDetecting)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!isValidBoard || testingBoardId != nil)
+                
+                // Add & Test button
+                if needsDetection {
+                    Button(action: addBoard) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add & Test Board")
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!canAddBoard || testingBoardId != nil)
+                } else {
+                    Button(action: addBoard) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add & Test Board")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canAddBoard || testingBoardId != nil)
+                }
                 
                 if testingBoardId != nil {
                     HStack {
                         ProgressView()
                             .scaleEffect(0.8)
-                        Text("Testing the board...")
+                        Text("Testing...")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -244,11 +351,12 @@ struct AddBoardSection: View {
     }
     
     private func addBoard() {
-        guard isValidBoard,
-              let config = JobBoardConfig(
-                name: newBoardName.isEmpty ? "" : newBoardName,
-                url: newBoardURL
-              ) else { return }
+        let finalUrl = urlToUse.isEmpty ? newBoardURL : urlToUse
+            
+        guard let config = JobBoardConfig(
+            name: newBoardName.isEmpty ? extractCompanyName(from: finalUrl) : newBoardName,
+            url: finalUrl
+        ) else { return }
         
         monitor.addBoardConfig(config)
         
@@ -262,6 +370,68 @@ struct AddBoardSection: View {
         
         newBoardName = ""
         newBoardURL = ""
+        urlToUse = ""
+        detectionResult = nil
+    }
+    
+    private func detectATS() {
+        guard let url = URL(string: newBoardURL) else {
+            detectionResult = ATSDetectorService.DetectionResult(
+                source: nil,
+                confidence: .notDetected,
+                apiEndpoint: nil,
+                actualATSUrl: nil,
+                message: "Invalid URL format"
+            )
+            return
+        }
+        
+        isDetecting = true
+        detectionResult = nil
+        urlToUse = ""
+        
+        Task {
+            do {
+                let result = try await ATSDetectorService.shared.detectATS(from: url)
+                await MainActor.run {
+                    detectionResult = result
+                    
+                    if let atsUrl = result.actualATSUrl {
+                        urlToUse = atsUrl
+                        
+                        if newBoardName.isEmpty, result.source != nil {
+                            newBoardName = extractCompanyName(from: atsUrl)
+                        }
+                    }
+                    
+                    isDetecting = false
+                }
+            } catch {
+                await MainActor.run {
+                    detectionResult = ATSDetectorService.DetectionResult(
+                        source: nil,
+                        confidence: .notDetected,
+                        apiEndpoint: nil,
+                        actualATSUrl: nil,
+                        message: "Error: \(error.localizedDescription)"
+                    )
+                    isDetecting = false
+                }
+            }
+        }
+    }
+        
+    private func extractCompanyName(from urlString: String) -> String {
+        guard let url = URL(string: urlString) else { return "" }
+        
+        if let host = url.host {
+            let parts = host.components(separatedBy: ".")
+            if parts.count > 0 && !["www", "careers", "jobs"].contains(parts[0]) {
+                return parts[0].capitalized
+            }
+        }
+        
+        return ""
     }
 }
 
@@ -403,5 +573,68 @@ struct JobBoardsDocument: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         let data = content.data(using: .utf8)!
         return FileWrapper(regularFileWithContents: data)
+    }
+}
+
+struct DetectionResultView: View {
+    let result: ATSDetectorService.DetectionResult
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+                .foregroundColor(iconColor)
+            
+            Text(result.message)
+                .font(.callout)
+                .foregroundColor(textColor)
+            
+            Spacer()
+            
+            if let source = result.source {
+                Label(source.rawValue, systemImage: source.icon)
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(source.color.opacity(0.1))
+                    .cornerRadius(6)
+            }
+        }
+        .padding()
+        .background(backgroundColor)
+        .cornerRadius(8)
+    }
+    
+    private var iconName: String {
+        switch result.confidence {
+        case .certain: return "checkmark.circle.fill"
+        case .likely: return "questionmark.circle.fill"
+        case .uncertain: return "exclamationmark.triangle.fill"
+        case .notDetected: return "xmark.circle.fill"
+        }
+    }
+    
+    private var iconColor: Color {
+        switch result.confidence {
+        case .certain: return .green
+        case .likely: return .blue
+        case .uncertain: return .orange
+        case .notDetected: return .red
+        }
+    }
+    
+    private var textColor: Color {
+        switch result.confidence {
+        case .certain, .likely: return .primary
+        case .uncertain, .notDetected: return .secondary
+        }
+    }
+    
+    private var backgroundColor: Color {
+        switch result.confidence {
+        case .certain: return .green.opacity(0.1)
+        case .likely: return .blue.opacity(0.1)
+        case .uncertain: return .orange.opacity(0.1)
+        case .notDetected: return .red.opacity(0.1)
+        }
     }
 }

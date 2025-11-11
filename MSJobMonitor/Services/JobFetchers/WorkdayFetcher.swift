@@ -247,22 +247,41 @@ actor WorkdayFetcher: JobFetcherProtocol {
             if let errorString = String(data: data, encoding: .utf8) {
                 print("🔵 [Workday] ❌ Error response body: \(errorString.prefix(200))")
             }
-            throw FetchError.httpError(httpResponse.statusCode)
+            throw FetchError.httpError(statusCode: httpResponse.statusCode)
         }
         
         do {
             let decoded = try JSONDecoder().decode(WorkdayResponse.self, from: data)
             return decoded
+        } catch let DecodingError.keyNotFound(key, context) {
+            print("🔵 [Workday] ❌ Missing key '\(key.stringValue)' at path: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🔵 [Workday] Response preview: \(responseString.prefix(500))")
+            }
+            throw FetchError.decodingError(details: "Missing field '\(key.stringValue)' in Workday response")
+        } catch let DecodingError.typeMismatch(type, context) {
+            print("🔵 [Workday] ❌ Type mismatch for \(type) at: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            throw FetchError.decodingError(details: "Type mismatch in Workday response")
         } catch {
             print("🔵 [Workday] ❌ JSON decode error: \(error)")
             if let responseString = String(data: data, encoding: .utf8) {
                 print("🔵 [Workday] Response preview: \(responseString.prefix(500))")
             }
-            throw FetchError.parsingFailed
+            throw FetchError.decodingError(details: "Failed to decode Workday response: \(error.localizedDescription)")
         }
     }
     
     private func convertWorkdayJob(_ workdayJob: WorkdayJobPosting, config: WorkdayConfig, storedJobDates: [String: Date], currentDate: Date) -> Job? {
+        guard !workdayJob.title.isEmpty else {
+            print("🔵 [Workday] ⚠️ Skipping job: empty title")
+            return nil
+        }
+        
+        guard !workdayJob.externalPath.isEmpty else {
+            print("🔵 [Workday] ⚠️ Skipping job '\(workdayJob.title)': empty external path")
+            return nil
+        }
+        
         let jobId = workdayJob.bulletFields.first ?? UUID().uuidString
         
         let pathComponents = workdayJob.externalPath.components(separatedBy: "/")

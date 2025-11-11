@@ -152,7 +152,7 @@ struct JobListHeader: View {
     // Show all possible sources
     private var supportedSources: [JobSource] {
         // Return all supported source types
-        return [.microsoft, .tiktok, .snap, .amd, .greenhouse, .lever, .ashby]
+        return [.microsoft, .tiktok, .snap, .amd, .greenhouse, .lever, .ashby, .workday]
             .filter { $0.isSupported }
             .sorted { $0.rawValue < $1.rawValue }
     }
