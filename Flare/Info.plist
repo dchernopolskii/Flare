@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>lifeattiktok.com</key>
+			<string></string>
+		</dict>
+	</dict>
+	<key>SUFeedURL</key>
+	<string>https://dchernopolskiy.github.io/MSJobs/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>bCyc3bVe4c/PTLmeYaI/1+4VoIC7zI3OWWvoj27c7ag=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<string>True</string>
+</dict>
+</plist>
