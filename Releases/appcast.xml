@@ -3,12 +3,13 @@
     <channel>
         <title>FlareJobMonitor</title>
         <item>
-            <title>1.0</title>
-            <pubDate>Tue, 02 Dec 2025 15:08:52 -0800</pubDate>
-            <sparkle:version>1</sparkle:version>
-            <sparkle:shortVersionString>1.2</sparkle:shortVersionString>
+            <title>Flare 1.8</title>
+            <pubDate>Thu, 30 Jul 2026 10:38:54 +0000</pubDate>
+            <sparkle:version>1.8</sparkle:version>
+            <sparkle:shortVersionString>1.8</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://dchernopolskiy.github.io/Flare/Releases/Flare-1.2.0.zip" length="2368912" type="application/octet-stream" sparkle:edSignature="mkg0z7huw/zZdON96CAoo2Xp1YCQ2tlTtaPnsq52UMZdyODAjTmCFRtuL9PBbqI1Es8KfN42tbMH85LDMGAZCg=="/>
+            <sparkle:releaseNotesLink>https://github.com/dchernopolskiy/Flare/releases/tag/v1.8</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/dchernopolskiy/Flare/releases/download/v1.8/FlareJobMonitor.zip" length="10587535" type="application/zip" sparkle:edSignature="r2Jas37a+3R6rFBTcpV0vUPjyZpZmAxPWqC6KN/j/Zx6UDQJS/O4xWYD+0plaW1TTeZfLzoouCcGsBSwGnLCDA=="/>
         </item>
     </channel>
 </rss>
