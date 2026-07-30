@@ -12,31 +12,19 @@ Adding a board is now a small flow instead of a blind URL save. Paste the public
 
 There is also a settings view for sources, title/location filters, refresh depth and timing, the local model, automatic Sparkle updates and clearing the local job cache without touching boards, settings, kept jobs or the model. So yes, the bundle version did eventually happen.
 
-<p align="center">
-<img width="1722" height="1047" alt="image" src="https://github.com/user-attachments/assets/534c9e5c-5dab-4a6e-a742-d111f1d4ed44" />
-</p>
-
-<p align="center">
-<img width="722" height="602" alt="image" src="https://github.com/user-attachments/assets/a6da55a8-74ec-4b9b-8fab-8e8e1909f49f" />
-</p>
-
-<p align="center">
-<img width="1724" height="1047" alt="image" src="https://github.com/user-attachments/assets/01205f66-6c1f-40b6-bde5-19a6ac1356e1" />
-</p>
-
 Current v1.10 job desk:
 
 <p align="center">
 <img width="1225" height="768" alt="Flare v1.10 job desk showing recent jobs, source filters and job states" src="docs/screenshots/flare-v1.9-jobs.jpg" />
 </p>
 
-Current job board flow:
+Job board flow:
 
 <p align="center">
 <img width="1225" height="768" alt="Flare v1.10 job board management and careers page detection flow" src="docs/screenshots/flare-v1.9-job-boards.jpg" />
 </p>
 
-Current settings:
+Settings:
 
 <p align="center">
 <img width="1225" height="768" alt="Flare v1.10 settings for sources, local AI parsing, filters and refresh behavior" src="docs/screenshots/flare-v1.9-settings.jpg" />
