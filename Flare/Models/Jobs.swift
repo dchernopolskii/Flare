@@ -327,7 +327,7 @@ enum JobSource: String, Codable, CaseIterable, Equatable {
     var isSupported: Bool {
         switch self {
         case .microsoft, .apple, .google, .tiktok, .greenhouse,
-             .ashby, .lever, .snap, .amd, .meta, .workday, .icims, .taleo, .unknown:
+             .ashby, .lever, .snap, .amd, .meta, .workday, .bamboohr, .icims, .taleo, .unknown:
             return true
         default:
             return false

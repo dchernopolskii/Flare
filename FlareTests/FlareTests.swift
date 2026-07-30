@@ -167,6 +167,11 @@ struct JobSourceTests {
         }
     }
 
+    @Test func detectBambooHRFromURL() async throws {
+        let source = JobSource.detectFromURL("https://acme.bamboohr.com/careers")
+        #expect(source == .bamboohr)
+    }
+
     @Test func unknownSourceForCustomURL() async throws {
         let url = "https://careers.netflix.com/jobs"
         let source = JobSource.detectFromURL(url)
@@ -406,6 +411,49 @@ private final class FetcherURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private final class BambooHRURLProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var recordedURLs: [URL] = []
+    private nonisolated(unsafe) static var responseData = Data()
+
+    static func reset(responseData: Data) {
+        lock.withLock {
+            self.responseData = responseData
+            recordedURLs = []
+        }
+    }
+
+    static var requests: [URL] {
+        lock.withLock { recordedURLs }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let data = Self.lock.withLock { () -> Data in
+            Self.recordedURLs.append(url)
+            return Self.responseData
+        }
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 @Suite(.serialized)
 struct UniversalJobFetcherTests {
     private func makeSession() -> URLSession {
@@ -486,6 +534,46 @@ struct UniversalJobFetcherTests {
         #expect(jobs.count == 1)
         #expect(jobs.first?.title == "Data Engineer")
         #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings", "/api/jobs"])
+    }
+}
+
+@Suite(.serialized)
+struct BambooHRFetcherTests {
+    private func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BambooHRURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    @Test func usesCareersListEndpointAndMapsOpenings() async throws {
+        let payload = #"""
+        {
+          "result": [{
+            "id": "42",
+            "jobOpeningName": "Product Manager",
+            "departmentLabel": "Product",
+            "employmentStatusLabel": "Full-Time",
+            "location": {"city": "Seattle", "state": "WA"},
+            "atsLocation": {"country": "United States"},
+            "isRemote": true
+          }]
+        }
+        """#
+
+        BambooHRURLProtocol.reset(responseData: Data(payload.utf8))
+
+        let jobs = try await BambooHRFetcher(session: makeSession()).fetchJobs(
+            from: URL(string: "https://acme.bamboohr.com/careers/jobs/42?source=test")!
+        )
+
+        #expect(BambooHRURLProtocol.requests.map(\.absoluteString) == ["https://acme.bamboohr.com/careers/list"])
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.id == "bamboohr-acme-42")
+        #expect(jobs.first?.title == "Product Manager")
+        #expect(jobs.first?.location == "Seattle, WA, United States")
+        #expect(jobs.first?.url == "https://acme.bamboohr.com/careers/42")
+        #expect(jobs.first?.workSiteFlexibility == "Remote")
+        #expect(jobs.first?.source == .bamboohr)
     }
 }
 

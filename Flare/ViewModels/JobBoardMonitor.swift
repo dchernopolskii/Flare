@@ -36,6 +36,7 @@ class JobBoardMonitor: ObservableObject {
     private let ashbyFetcher = AshbyFetcher()
     private let leverFetcher = LeverFetcher()
     private let workdayFetcher = WorkdayFetcher()
+    private let bambooHRFetcher = BambooHRFetcher()
     private let icimsFetcher = iCIMSFetcher()
     private let taleoFetcher = TaleoFetcher()
     private let smartParser = SmartJobParser()
@@ -384,7 +385,7 @@ class JobBoardMonitor: ObservableObject {
     }
 
     private func directATSCandidates(from jobs: [Job]) -> [(source: JobSource, url: URL)] {
-        let preferredOrder: [JobSource] = [.workday, .greenhouse, .lever, .ashby, .icims, .taleo]
+        let preferredOrder: [JobSource] = [.workday, .greenhouse, .lever, .ashby, .bamboohr, .icims, .taleo]
         var candidates: [(source: JobSource, url: URL)] = []
         var seen = Set<String>()
 
@@ -717,6 +718,8 @@ class JobBoardMonitor: ObservableObject {
             return try await leverFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
         case .workday:
             return try await workdayFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
+        case .bamboohr:
+            return try await bambooHRFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
         case .icims:
             return try await icimsFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
         case .taleo:
