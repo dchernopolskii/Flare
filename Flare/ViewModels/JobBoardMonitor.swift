@@ -202,6 +202,31 @@ class JobBoardMonitor: ObservableObject {
             let html = try await fetchHTMLForDetection(url: url)
             let jobs = extractJobsWithoutLLM(html: html, url: url)
 
+            // Page-native records are useful evidence, but their application links can
+            // reveal the authoritative ATS even when the page itself is custom. Try
+            // those sources before settling for the page's embedded job payload.
+            for candidate in directATSCandidates(from: jobs) {
+                await MainActor.run {
+                    detectionStatus = "Found \(candidate.source.rawValue), fetching jobs..."
+                }
+
+                do {
+                    let atsJobs = try await fetchJobsForSource(candidate.source, url: candidate.url)
+                    if !atsJobs.isEmpty {
+                        await MainActor.run { detectionInProgress = false }
+                        return DetectionPreview(
+                            jobCount: atsJobs.count,
+                            parsingMethod: .directATS,
+                            queryURL: candidate.url.absoluteString,
+                            atsType: candidate.source.rawValue.lowercased(),
+                            evidenceSummary: "Verified from job application links on the careers page."
+                        )
+                    }
+                } catch {
+                    print("[Detection] Application-link ATS fetch error for \(candidate.source.rawValue): \(error)")
+                }
+            }
+
             if jobs.count >= 3 {
                 let method = determineParsingMethod(from: jobs)
                 await MainActor.run { detectionInProgress = false }
@@ -356,6 +381,50 @@ class JobBoardMonitor: ObservableObject {
         }
 
         return allJobs
+    }
+
+    private func directATSCandidates(from jobs: [Job]) -> [(source: JobSource, url: URL)] {
+        let preferredOrder: [JobSource] = [.workday, .greenhouse, .lever, .ashby, .icims, .taleo]
+        var candidates: [(source: JobSource, url: URL)] = []
+        var seen = Set<String>()
+
+        for job in jobs {
+            guard let source = JobSource.detectFromURL(job.url),
+                  source.isSupported,
+                  source != .unknown,
+                  let normalizedURL = normalizedATSURL(job.url, for: source) else {
+                continue
+            }
+
+            let key = "\(source.rawValue)|\(normalizedURL.absoluteString)"
+            guard seen.insert(key).inserted else { continue }
+            candidates.append((source, normalizedURL))
+        }
+
+        return candidates.sorted {
+            let left = preferredOrder.firstIndex(of: $0.source) ?? preferredOrder.count
+            let right = preferredOrder.firstIndex(of: $1.source) ?? preferredOrder.count
+            return left < right
+        }
+    }
+
+    private func normalizedATSURL(_ rawURL: String, for source: JobSource) -> URL? {
+        guard let url = URL(string: rawURL) else { return nil }
+        guard source == .workday else { return url }
+
+        let path = url.path
+        let boardPath: String
+        if let jobRange = path.range(of: "/job/") {
+            boardPath = String(path[..<jobRange.lowerBound])
+        } else if let detailsRange = path.range(of: "/details/") {
+            boardPath = String(path[..<detailsRange.lowerBound])
+        } else {
+            boardPath = path
+        }
+
+        guard let host = url.host, !boardPath.isEmpty else { return url }
+        let pathWithTrailingSlash = boardPath.hasSuffix("/") ? boardPath : "\(boardPath)/"
+        return URL(string: "\(url.scheme ?? "https")://\(host)\(pathWithTrailingSlash)")
     }
 
     private func extractEmbeddedApplicationJobs(html: String, url: URL) -> [Job] {
