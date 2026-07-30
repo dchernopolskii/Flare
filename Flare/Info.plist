@@ -20,5 +20,7 @@
 	<string>D9fnTujzQXXSsl0wwg40KmaHVJcdv4Zsh4bLZPkKs2U=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
 </dict>
 </plist>
