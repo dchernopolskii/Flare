@@ -9,7 +9,7 @@
             <sparkle:shortVersionString>1.9</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.4</sparkle:minimumSystemVersion>
             <sparkle:releaseNotesLink>https://github.com/dchernopolskiy/Flare/releases/tag/v1.9</sparkle:releaseNotesLink>
-            <enclosure url="https://github.com/dchernopolskiy/Flare/releases/download/v1.9/FlareJobMonitor.zip" length="10589371" type="application/zip" sparkle:edSignature="D+zxJjWB2PlvTNM31f/S30flD+/jFP1FLEGrYq6hRLzl6FIiYTH+ubPAfl+1zpOUQi06u6B5RcqTPnSGrPcuAg=="/>
+            <enclosure url="https://github.com/dchernopolskiy/Flare/releases/download/v1.9/FlareJobMonitor.zip" length="10589536" type="application/zip" sparkle:edSignature="0dL1sDztZKbuflYE9vrhArZL4m/URRVTlsdMId65ai4riLJSVSDyr1o+S3fmYnLlxMxmz297blOOqa1IYX/VAg=="/>
         </item>
     </channel>
 </rss>
