@@ -84,10 +84,26 @@ actor SmartJobParser {
         let renderedHTML: String?  // HTML from WebKit render, for fallback parsing
     }
 
-    func parseJobs(from url: URL, titleFilter: String = "", locationFilter: String = "", statusCallback: (@Sendable (String) -> Void)? = nil) async -> [Job] {
+    func parseJobs(
+        from url: URL,
+        titleFilter: String = "",
+        locationFilter: String = "",
+        allowLLMFallback: Bool = true,
+        statusCallback: (@Sendable (String) -> Void)? = nil
+    ) async -> [Job] {
         let secureURL = upgradeToHTTPS(url)
         print("[SmartParser] Parsing jobs from: \(secureURL.absoluteString)")
         await updateStatus("Analyzing website...", callback: statusCallback)
+
+        if let cachedJobs = await fetchFromCachedRouteIfAvailable(
+            url: secureURL,
+            titleFilter: titleFilter,
+            locationFilter: locationFilter,
+            statusCallback: statusCallback
+        ) {
+            print("[SmartParser] Success via cached route: \(cachedJobs.count) jobs")
+            return cachedJobs
+        }
 
         // Try API/ATS detection first
         do {
@@ -102,26 +118,21 @@ actor SmartJobParser {
             print("[SmartParser] API/ATS detection failed: \(error.localizedDescription)")
         }
 
-        if let cachedJobs = await fetchFromCachedRouteIfAvailable(
-            url: secureURL,
-            titleFilter: titleFilter,
-            locationFilter: locationFilter,
-            statusCallback: statusCallback
-        ) {
-            print("[SmartParser] Success via cached route: \(cachedJobs.count) jobs")
-            return cachedJobs
-        }
-
         // Fall back to LLM if enabled
         let aiParsingEnabled = UserDefaults.standard.bool(forKey: "enableAIParser")
-        if aiParsingEnabled {
+        if aiParsingEnabled && allowLLMFallback {
             print("[SmartParser] Falling back to LLM parsing...")
             await updateStatus("Using AI to analyze site...", callback: statusCallback)
             return await parseWithLLM(url: secureURL, titleFilter: titleFilter, locationFilter: locationFilter, statusCallback: statusCallback)
         }
 
-        print("[SmartParser] All parsing methods exhausted")
-        await updateStatus("Unable to parse - enable AI parsing in Settings", callback: statusCallback)
+        if aiParsingEnabled {
+            print("[SmartParser] Deterministic parsing exhausted; skipping LLM during routine refresh")
+            await updateStatus("No saved route — use Test to re-detect", callback: statusCallback)
+        } else {
+            print("[SmartParser] All parsing methods exhausted")
+            await updateStatus("Unable to parse - enable AI parsing in Settings", callback: statusCallback)
+        }
         return []
     }
 

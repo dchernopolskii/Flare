@@ -58,58 +58,43 @@ actor WorkdayFetcher: URLBasedJobFetcherProtocol {
         }
         
         let locationIds = extractLocationIds(
-            from: locationFilter,
+            from: LocationMatcher.physicalKeywords(from: locationFilter).joined(separator: ","),
             company: config.cacheKey
         )
-        
+
         let titleKeywords = titleFilter.parseAsFilterKeywords()
         let searchText = titleKeywords.joined(separator: " ")
-        var allJobs: [Job] = []
-        var offset = 0
-        let limit = 20
-        
-        for page in 0..<15 {
-            print("[Workday] Fetching page \(page + 1) for \(config.company) (offset: \(offset))...")
+        let wantsRemote = LocationMatcher.includesRemote(locationFilter)
+        let remoteFacetID = initialResponse.facets.flatMap(extractRemoteFacetID)
 
-            let response = try await fetchJobsPage(
-                config: config,
-                session: session,
-                offset: offset,
-                searchText: searchText,
-                locationIds: locationIds,
-                remoteType: nil
+        var allJobs: [Job] = []
+        if !locationIds.isEmpty || !wantsRemote {
+            allJobs += try await fetchAllPages(
+                config: config, session: session, searchText: searchText,
+                locationIds: locationIds, remoteType: nil,
+                storedJobDates: storedJobDates, currentDate: currentDate
             )
-            print("[Workday] Page \(page + 1): received \(response.jobPostings.count) jobs")
-            
-            if response.jobPostings.isEmpty {
-                break
-            }
-            
-            let pageJobs = response.jobPostings.compactMap { workdayJob -> Job? in
-                convertWorkdayJob(workdayJob, config: config, storedJobDates: storedJobDates, currentDate: currentDate)
-            }
-            
-            allJobs.append(contentsOf: pageJobs)
-            
-            if response.jobPostings.count < limit {
-                break
-            }
-            
-            offset += limit
-            try await Task.sleep(nanoseconds: FetchDelayConfig.boardFetchDelay)
         }
+
+        if wantsRemote {
+            // Workday applies facets as an intersection. Fetch remote separately so
+            // "Seattle, remote" means Seattle OR remote, not Seattle AND remote.
+            allJobs += try await fetchAllPages(
+                config: config, session: session, searchText: searchText,
+                locationIds: [], remoteType: remoteFacetID,
+                storedJobDates: storedJobDates, currentDate: currentDate
+            )
+        }
+
+        allJobs = Array(Dictionary(grouping: allJobs, by: \.id).compactMap { $0.value.first })
 
         print("[Workday] Finished fetching pages, total jobs: \(allJobs.count)")
 
-        let shouldApplyLocationFilter = locationIds.isEmpty && !locationFilter.isEmpty
-
         let filteredJobs: [Job]
-        if shouldApplyLocationFilter {
-            let locationKeywords = locationFilter.parseAsFilterKeywords()
-            filteredJobs = applyClientSideFilters(
-                jobs: allJobs,
+        if !locationFilter.isEmpty {
+            filteredJobs = allJobs.applying(
                 titleKeywords: [],
-                locationKeywords: locationKeywords
+                locationKeywords: locationFilter.parseAsFilterKeywords()
             )
             print("[Workday] After location filter: \(filteredJobs.count) jobs")
         } else {
@@ -272,6 +257,37 @@ actor WorkdayFetcher: URLBasedJobFetcherProtocol {
             throw FetchError.decodingError(details: "Failed to decode Workday response: \(error.localizedDescription)")
         }
     }
+
+    private func fetchAllPages(
+        config: WorkdayConfig,
+        session: WorkdaySession,
+        searchText: String,
+        locationIds: [String],
+        remoteType: String?,
+        storedJobDates: [String: Date],
+        currentDate: Date
+    ) async throws -> [Job] {
+        var jobs: [Job] = []
+        var offset = 0
+        let limit = 20
+
+        for page in 0..<15 {
+            let response = try await fetchJobsPage(
+                config: config, session: session, offset: offset, searchText: searchText,
+                locationIds: locationIds, remoteType: remoteType
+            )
+            print("[Workday] Page \(page + 1): received \(response.jobPostings.count) jobs")
+            guard !response.jobPostings.isEmpty else { break }
+
+            jobs += response.jobPostings.compactMap {
+                convertWorkdayJob($0, config: config, storedJobDates: storedJobDates, currentDate: currentDate)
+            }
+            guard response.jobPostings.count == limit else { break }
+            offset += limit
+            try await Task.sleep(nanoseconds: FetchDelayConfig.boardFetchDelay)
+        }
+        return jobs
+    }
     
     private func convertWorkdayJob(_ workdayJob: WorkdayJobPosting, config: WorkdayConfig, storedJobDates: [String: Date], currentDate: Date) -> Job? {
         guard let title = workdayJob.title, !title.isEmpty else {
@@ -406,6 +422,17 @@ actor WorkdayFetcher: URLBasedJobFetcherProtocol {
         }
         
         return locationIds
+    }
+
+    private func extractRemoteFacetID(from facets: [WorkdayFacet]) -> String? {
+        for facet in facets where facet.facetParameter.localizedCaseInsensitiveContains("remote") {
+            if let value = facet.extractLocationValues().first(where: {
+                $0.descriptor.localizedCaseInsensitiveContains("remote")
+            }) {
+                return value.id
+            }
+        }
+        return nil
     }
     
     private func applyClientSideFilters(jobs: [Job], titleKeywords: [String], locationKeywords: [String]) -> [Job] {

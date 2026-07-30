@@ -25,7 +25,13 @@ actor iCIMSFetcher: URLBasedJobFetcherProtocol {
         let titleKeywords = titleFilter.parseAsFilterKeywords()
         let includeRemote = UserDefaults.standard.object(forKey: "includeRemoteJobs") as? Bool ?? true
         let locationKeywords = locationFilter.parseAsFilterKeywords().includingRemote(if: includeRemote)
-        let filteredJobs = allJobs.applying(titleKeywords: titleKeywords, locationKeywords: locationKeywords)
+        // Some iCIMS search pages omit location metadata entirely. Do not turn a
+        // user preference into an empty board just because this listing endpoint
+        // only exposes the location on the individual job page.
+        let hasUsableLocations = allJobs.contains { $0.location != "See job details" }
+        let filteredJobs = hasUsableLocations
+            ? allJobs.applying(titleKeywords: titleKeywords, locationKeywords: locationKeywords)
+            : allJobs.applying(titleKeywords: titleKeywords, locationKeywords: [])
 
         FetcherLog.info("iCIMS", "Fetched \(allJobs.count) total, \(filteredJobs.count) after filtering")
         await trackingService.saveTrackingData(filteredJobs, for: "icims_\(companySlug)", currentDate: currentDate, retentionDays: 30)

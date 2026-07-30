@@ -68,10 +68,8 @@ extension Array where Element == Job {
         }
 
         if !locationFilter.isEmpty {
-            let keywords = locationFilter.lowercased().components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            result = result.filter { job in
-                let location = job.location.lowercased()
-                return keywords.contains { location.contains($0) }
+            result = result.filter {
+                LocationMatcher.matches($0, locationKeywords: locationFilter.parseAsFilterKeywords())
             }
         }
 
@@ -103,11 +101,7 @@ extension Array where Element == Job {
         if !locationKeywords.isEmpty {
             let keywords = locationKeywords.filter { !$0.isEmpty }
             if !keywords.isEmpty {
-                result = result.filter { job in
-                    keywords.contains { keyword in
-                        job.location.localizedCaseInsensitiveContains(keyword)
-                    }
-                }
+                result = result.filter { LocationMatcher.matches($0, locationKeywords: keywords) }
             }
         }
 
@@ -237,7 +231,7 @@ struct Job: Identifiable, Codable, Equatable {
 }
 
 // MARK: - Job Source Enum
-enum JobSource: String, Codable, CaseIterable {
+enum JobSource: String, Codable, CaseIterable, Equatable {
     case microsoft = "Microsoft"
     case apple = "Apple"
     case google = "Google"

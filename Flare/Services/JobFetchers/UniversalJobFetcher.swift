@@ -11,28 +11,20 @@ import WebKit
 actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
 
     private let llmParser = LLMParser.shared
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
 
     func fetchJobs(from url: URL, titleFilter: String = "", locationFilter: String = "") async throws -> [Job] {
         FetcherLog.info("Universal", "Starting extraction from: \(url.absoluteString)")
-
-        let isLLMEnabled = UserDefaults.standard.bool(forKey: "enableAIParser")
 
         let (html, extractedJobs) = try await extractFromJSON(url: url)
 
         if !extractedJobs.isEmpty {
             FetcherLog.info("Universal", "Found \(extractedJobs.count) jobs via JSON/API")
             return filterJobs(extractedJobs, titleFilter: titleFilter, locationFilter: locationFilter)
-        }
-
-        if isLLMEnabled {
-            if let llmAPIJobs = await tryLLMAPIDiscovery(html: html, url: url), !llmAPIJobs.isEmpty {
-                return filterJobs(llmAPIJobs, titleFilter: titleFilter, locationFilter: locationFilter)
-            }
-
-            let llmJobs = await tryLLMExtraction(html: html, url: url)
-            if !llmJobs.isEmpty {
-                return filterJobs(llmJobs, titleFilter: titleFilter, locationFilter: locationFilter)
-            }
         }
 
         let patternJobs = extractJobsFromHTMLPatterns(html: html, baseURL: url)
@@ -68,19 +60,21 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
             allJobs = allJobs.merging(embeddedJobs)
         }
 
-        // Try inline API discovery from HTML before generic paths
-        let inlineAPIJobs = await discoverAPIFromHTML(html: html, baseURL: url)
-        if !inlineAPIJobs.isEmpty {
-            FetcherLog.debug("Universal", "Inline API found \(inlineAPIJobs.count) jobs")
-            allJobs = allJobs.merging(inlineAPIJobs)
+        // Discovery is a fallback. Once the page has yielded structured jobs,
+        // probing additional routes adds latency and duplicates network work.
+        if allJobs.isEmpty {
+            let inlineAPIJobs = await discoverAPIFromHTML(html: html, baseURL: url)
+            if !inlineAPIJobs.isEmpty {
+                FetcherLog.debug("Universal", "Inline API found \(inlineAPIJobs.count) jobs")
+                allJobs = inlineAPIJobs
+            }
         }
 
-        // Only try generic API paths if we haven't found enough jobs
-        if allJobs.count < 5 {
+        if allJobs.isEmpty {
             let apiJobs = try await discoverAndFetchAPI(baseURL: url)
             if !apiJobs.isEmpty {
                 FetcherLog.debug("Universal", "API discovery found \(apiJobs.count) jobs")
-                allJobs = allJobs.merging(apiJobs)
+                allJobs = apiJobs
             }
         }
 
@@ -124,7 +118,7 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
                     request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
                     request.timeoutInterval = 8
 
-                    let (data, response) = try await URLSession.shared.data(for: request)
+                    let (data, response) = try await session.data(for: request)
 
                     guard let httpResponse = response as? HTTPURLResponse,
                           httpResponse.statusCode == 200 else { continue }
@@ -330,7 +324,7 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
                 request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
                 request.timeoutInterval = 10
 
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session.data(for: request)
 
                 guard let httpResponse = response as? HTTPURLResponse,
                       httpResponse.statusCode == 200,
@@ -387,7 +381,7 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
         request.setValue(baseURL.absoluteString, forHTTPHeaderField: "Referer")
         request.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             return []
@@ -525,7 +519,7 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
         request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 15
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await session.data(for: request)
 
         guard let html = String(data: data, encoding: .utf8) else {
             throw FetchError.decodingError(details: "Failed to decode HTML")
@@ -750,7 +744,7 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
                 request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
                 request.timeoutInterval = 10
 
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session.data(for: request)
 
                 guard let httpResponse = response as? HTTPURLResponse,
                       httpResponse.statusCode == 200 else {

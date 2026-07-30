@@ -76,6 +76,44 @@ struct JobTests {
     }
 }
 
+// MARK: - Location Matching Tests
+
+struct LocationMatchingTests {
+    private func job(location: String, flexibility: String? = nil) -> Job {
+        Job(
+            id: UUID().uuidString,
+            title: "Test Job",
+            location: location,
+            postingDate: nil,
+            url: "https://example.com/job",
+            description: "",
+            workSiteFlexibility: flexibility,
+            source: .greenhouse,
+            companyName: "Test Co",
+            department: nil,
+            category: nil,
+            firstSeenDate: Date(),
+            originalPostingDate: nil,
+            wasBumped: false
+        )
+    }
+
+    @Test func seattleMatchesStateAndMetroAliases() async throws {
+        #expect(LocationMatcher.matches(job(location: "Washington, USA"), locationKeywords: ["seattle"]))
+        #expect(LocationMatcher.matches(job(location: "Greater Seattle Area"), locationKeywords: ["seattle"]))
+        #expect(!LocationMatcher.matches(job(location: "Austin, TX"), locationKeywords: ["seattle"]))
+    }
+
+    @Test func remoteMatchesWorkplaceMetadata() async throws {
+        #expect(LocationMatcher.matches(job(location: "New York, NY", flexibility: "Remote"), locationKeywords: ["remote"]))
+        #expect(!LocationMatcher.matches(job(location: "New York, NY", flexibility: "Onsite"), locationKeywords: ["remote"]))
+    }
+
+    @Test func locationsAreOrMatched() async throws {
+        #expect(LocationMatcher.matches(job(location: "Portland, OR"), locationKeywords: ["seattle", "portland"]))
+    }
+}
+
 // MARK: - JobSource Tests
 
 struct JobSourceTests {
@@ -317,6 +355,137 @@ struct DateFilterTests {
         let discoveryAge = Date().timeIntervalSince(job.firstSeenDate)
 
         #expect(discoveryAge <= discoveryCutoff)
+    }
+}
+
+// MARK: - Universal Fetcher Tests
+
+private final class FetcherURLProtocol: URLProtocol, @unchecked Sendable {
+    typealias Handler = @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
+
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var handler: Handler?
+    private nonisolated(unsafe) static var recordedURLs: [URL] = []
+
+    static func reset(handler: @escaping Handler) {
+        lock.withLock {
+            self.handler = handler
+            recordedURLs = []
+        }
+    }
+
+    static var requests: [URL] {
+        lock.withLock { recordedURLs }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let currentHandler = Self.lock.withLock { () -> Handler? in
+            Self.recordedURLs.append(url)
+            return Self.handler
+        }
+
+        do {
+            guard let currentHandler else { throw URLError(.resourceUnavailable) }
+            let (response, data) = try currentHandler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+@Suite(.serialized)
+struct UniversalJobFetcherTests {
+    private func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FetcherURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    private static func response(
+        for request: URLRequest,
+        contentType: String = "text/html",
+        statusCode: Int = 200
+    ) -> HTTPURLResponse {
+        HTTPURLResponse(
+            url: request.url!,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: ["Content-Type": contentType]
+        )!
+    }
+
+    @Test func structuredHTMLStopsBeforeAPIDiscovery() async throws {
+        let html = """
+        <html><script type="application/ld+json">
+        {
+          "@type": "JobPosting",
+          "title": "Senior Test Engineer",
+          "url": "/jobs/42",
+          "jobLocation": {"address": {"addressLocality": "Seattle", "addressRegion": "WA"}}
+        }
+        </script></html>
+        """
+
+        FetcherURLProtocol.reset { request in
+            (Self.response(for: request), Data(html.utf8))
+        }
+
+        let jobs = try await UniversalJobFetcher(session: makeSession())
+            .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
+
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.title == "Senior Test Engineer")
+        #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings"])
+    }
+
+    @Test func inlineAPIRouteRunsOnlyAfterEmptyHTML() async throws {
+        let html = #"<html><script>fetch('/api/jobs')</script></html>"#
+        let apiJSON = #"[{"id":"job-1","title":"Product Designer","location":"Remote","url":"/jobs/job-1"}]"#
+
+        FetcherURLProtocol.reset { request in
+            if request.url?.path == "/api/jobs" {
+                return (Self.response(for: request, contentType: "application/json"), Data(apiJSON.utf8))
+            }
+            return (Self.response(for: request), Data(html.utf8))
+        }
+
+        let jobs = try await UniversalJobFetcher(session: makeSession())
+            .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
+
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.title == "Product Designer")
+        #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings", "/api/jobs"])
+    }
+
+    @Test func genericAPIDiscoveryStopsAtFirstWorkingRoute() async throws {
+        let apiJSON = #"{"jobs":[{"id":"job-2","title":"Data Engineer","location":"Portland","url":"/jobs/job-2"}]}"#
+
+        FetcherURLProtocol.reset { request in
+            if request.url?.path == "/api/jobs" {
+                return (Self.response(for: request, contentType: "application/json"), Data(apiJSON.utf8))
+            }
+            return (Self.response(for: request), Data("<html></html>".utf8))
+        }
+
+        let jobs = try await UniversalJobFetcher(session: makeSession())
+            .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
+
+        #expect(jobs.count == 1)
+        #expect(jobs.first?.title == "Data Engineer")
+        #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings", "/api/jobs"])
     }
 }
 

@@ -5,10 +5,10 @@
 
 import SwiftUI
 import WebKit
-import Combine
 
 struct JobListView: View {
     @EnvironmentObject var jobManager: JobManager
+    @ObservedObject private var boardMonitor = JobBoardMonitor.shared
     @Binding var sidebarVisible: Bool
     let isWindowMinimized: Bool
 
@@ -22,8 +22,7 @@ struct JobListView: View {
     @State private var displayedCount = 50
     @State private var isLoadingMore = false
 
-    private let filterPublisher = PassthroughSubject<Void, Never>()
-    @State private var filterCancellable: AnyCancellable?
+    @State private var filterTask: Task<Void, Never>?
 
     private var displayedJobs: [Job] { Array(allFilteredJobs.prefix(displayedCount)) }
     private var hasMoreJobs: Bool { displayedCount < allFilteredJobs.count }
@@ -64,7 +63,7 @@ struct JobListView: View {
                             if jobManager.isLoading {
                                 HStack {
                                     ProgressView().scaleEffect(0.8)
-                                    Text(jobManager.loadingProgress.isEmpty ? "Refreshing..." : jobManager.loadingProgress)
+                                    Text(boardMonitor.activeFetchDescription ?? (jobManager.loadingProgress.isEmpty ? "Refreshing..." : jobManager.loadingProgress))
                                         .font(.caption).foregroundColor(.secondary)
                                 }.padding()
                             }
@@ -92,22 +91,31 @@ struct JobListView: View {
         }
         .preferredColorScheme(.light)
         .onAppear {
-            setupFilterDebouncing()
             updateFilteredJobs()
         }
-        .onChange(of: searchText) { _, _ in resetPagination(); filterPublisher.send() }
-        .onChange(of: selectedSources) { _, _ in resetPagination(); filterPublisher.send() }
-        .onChange(of: showOnlyStarred) { _, _ in resetPagination(); filterPublisher.send() }
-        .onChange(of: showOnlyApplied) { _, _ in resetPagination(); filterPublisher.send() }
+        .onChange(of: searchText) { _, _ in resetPagination(); scheduleFilterUpdate() }
+        .onChange(of: selectedSources) { _, _ in resetPagination(); scheduleFilterUpdate() }
+        .onChange(of: showOnlyStarred) { _, _ in resetPagination(); scheduleFilterUpdate() }
+        .onChange(of: showOnlyApplied) { _, _ in resetPagination(); scheduleFilterUpdate() }
+        .onChange(of: jobManager.locationFilter) { _, _ in resetPagination(); scheduleFilterUpdate() }
         .onChange(of: jobManager.allJobs) { _, _ in updateFilteredJobs() }
         .onChange(of: jobManager.starredJobIds) { _, _ in updateFilteredJobs() }
         .onChange(of: jobManager.appliedJobIds) { _, _ in updateFilteredJobs() }
+        .onDisappear { filterTask?.cancel() }
     }
 
-    private func setupFilterDebouncing() {
-        filterCancellable = filterPublisher
-            .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
-            .sink { _ in updateFilteredJobs() }
+    private func scheduleFilterUpdate() {
+        filterTask?.cancel()
+        filterTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 200_000_000)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            updateFilteredJobs()
+        }
     }
 
     private func updateFilteredJobs() {
@@ -257,7 +265,7 @@ struct JobListHeader: View {
                     Label("Sent", systemImage: "checkmark.circle").foregroundColor(showOnlyApplied ? FlareVisual.moss : FlareVisual.fadedInk)
                 }.toggleStyle(.button)
 
-                if !selectedSources.isEmpty && selectedSources.count < supportedSources.count {
+                if !allSourcesSelected {
                     Text("Filtered").font(.caption)
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(FlareVisual.brass.opacity(0.18), in: Capsule())

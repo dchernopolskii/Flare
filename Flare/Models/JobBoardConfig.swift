@@ -8,7 +8,7 @@
 
 import Foundation
 
-enum ParsingMethod: String, Codable {
+enum ParsingMethod: String, Codable, Equatable {
     case directATS = "Direct ATS"
     case apiDiscovery = "API Discovery"
     case schemaOrg = "Schema.org"
@@ -30,7 +30,7 @@ enum ParsingMethod: String, Codable {
     }
 }
 
-struct JobBoardConfig: Identifiable, Codable {
+struct JobBoardConfig: Identifiable, Codable, Equatable {
     var id = UUID()
     var name: String
     var url: String

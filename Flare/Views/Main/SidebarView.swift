@@ -10,6 +10,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject var jobManager: JobManager
+    @ObservedObject private var boardMonitor = JobBoardMonitor.shared
     @Binding var sidebarVisible: Bool
     let isWindowMinimized: Bool
     
@@ -97,8 +98,9 @@ struct SidebarView: View {
                 VStack(spacing: 4) {
                     ProgressView()
                         .scaleEffect(0.8)
-                    if !jobManager.loadingProgress.isEmpty {
-                        Text(jobManager.loadingProgress)
+                    let progress = boardMonitor.activeFetchDescription ?? jobManager.loadingProgress
+                    if !progress.isEmpty {
+                        Text(progress)
                             .font(.caption2)
                             .foregroundColor(FlareVisual.paper.opacity(0.64))
                             .multilineTextAlignment(.center)
@@ -183,5 +185,6 @@ struct SidebarButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar.\(title.lowercased().replacingOccurrences(of: " ", with: "-"))")
     }
 }

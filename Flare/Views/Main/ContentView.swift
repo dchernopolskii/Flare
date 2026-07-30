@@ -46,6 +46,8 @@ struct ContentView: View {
                                     .foregroundColor(.secondary)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Show Sidebar")
+                            .accessibilityIdentifier("sidebar.show")
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .help("Show Sidebar")

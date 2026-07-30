@@ -106,8 +106,18 @@ class JobManager: ObservableObject {
                 .filter { !$0.isEmpty }
             if !keywords.isEmpty {
                 filtered = filtered.filter { job in
-                    let title = job.title.lowercased()
-                    return keywords.contains { title.contains($0) }
+                    let searchableText = [
+                        job.title,
+                        job.companyName,
+                        job.location,
+                        job.department,
+                        job.category
+                    ]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
+                    .lowercased()
+
+                    return keywords.contains { searchableText.contains($0) }
                 }
             }
         }
@@ -117,16 +127,11 @@ class JobManager: ObservableObject {
                 .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
                 .filter { !$0.isEmpty }
             if !keywords.isEmpty {
-                filtered = filtered.filter { job in
-                    let location = job.location.lowercased()
-                    return keywords.contains { location.contains($0) }
-                }
+                filtered = filtered.filter { LocationMatcher.matches($0, locationKeywords: keywords) }
             }
         }
 
-        if !sourcesFilter.isEmpty {
-            filtered = filtered.filter { sourcesFilter.contains($0.source) }
-        }
+        filtered = filtered.filter { sourcesFilter.contains($0.source) }
 
         cachedFilteredJobs = filtered
         lastFilterParams = (titleFilter, locationFilter, sourcesFilter)
@@ -401,6 +406,10 @@ class JobManager: ObservableObject {
         }
 
         if enableCustomBoards {
+            let enabledBoardCount = JobBoardMonitor.shared.boardConfigs.filter(\.isEnabled).count
+            loadingProgress = enabledBoardCount == 1
+                ? "Refreshing 1 job board..."
+                : "Refreshing \(enabledBoardCount) job boards..."
             let tracker = FetchStatusTracker.shared
             tracker.startFetch(source: "Custom Boards")
 
@@ -450,6 +459,7 @@ class JobManager: ObservableObject {
         }
 
         let tracker = FetchStatusTracker.shared
+        loadingProgress = "Fetching from \(name)..."
         tracker.startFetch(source: name)
 
         do {
@@ -717,6 +727,10 @@ class JobManager: ObservableObject {
         guard let generation = beginFetch() else { return }
         defer { endFetch() }
 
+        let enabledBoardCount = JobBoardMonitor.shared.boardConfigs.filter(\.isEnabled).count
+        loadingProgress = enabledBoardCount == 1
+            ? "Refreshing 1 job board..."
+            : "Refreshing \(enabledBoardCount) job boards..."
         let tracker = FetchStatusTracker.shared
         tracker.startFetch(source: "Custom Boards")
         let customJobs = await JobBoardMonitor.shared.fetchAllBoardJobs(

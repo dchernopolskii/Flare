@@ -45,7 +45,7 @@ struct JobBoardsView: View {
             Divider()
             
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                LazyVStack(alignment: .leading, spacing: 24) {
                     ImportExportSection(
                         showImportDialog: $showImportDialog,
                         showExportDialog: $showExportDialog,
@@ -639,7 +639,13 @@ struct ConfiguredBoardsSection: View {
             }
             
             ForEach(monitor.boardConfigs) { config in
-                BoardConfigRow(config: config, testingBoardId: $testingBoardId)
+                BoardConfigRow(
+                    config: config,
+                    testingBoardId: $testingBoardId,
+                    testResult: monitor.testResults[config.id],
+                    parsingStatus: monitor.parsingStatus[config.id]
+                )
+                .equatable()
             }
         }
     }

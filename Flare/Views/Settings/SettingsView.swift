@@ -238,6 +238,7 @@ struct SettingsView: View {
                                     Label("Check for Updates Now", systemImage: "arrow.clockwise")
                                 }
                                 .buttonStyle(.bordered)
+                                .accessibilityIdentifier("settings.check-for-updates")
 
                                 Spacer()
                             }

@@ -25,7 +25,7 @@ struct JobBoardConfigSheet: View {
             Divider()
             
             ScrollView {
-                VStack(spacing: 24) {
+                LazyVStack(spacing: 24) {
                     AddBoardSection(
                         newBoardName: $newBoardName,
                         newBoardURL: $newBoardURL,
@@ -105,7 +105,13 @@ struct ConfiguredBoardsList: View {
             }
             
             ForEach(monitor.boardConfigs) { config in
-                BoardConfigRow(config: config, testingBoardId: $testingBoardId)
+                BoardConfigRow(
+                    config: config,
+                    testingBoardId: $testingBoardId,
+                    testResult: monitor.testResults[config.id],
+                    parsingStatus: monitor.parsingStatus[config.id]
+                )
+                .equatable()
             }
         }
     }
@@ -113,12 +119,20 @@ struct ConfiguredBoardsList: View {
 
 // MARK: - Board Config Row
 
-struct BoardConfigRow: View {
+struct BoardConfigRow: View, Equatable {
     let config: JobBoardConfig
     @Binding var testingBoardId: UUID?
-    @ObservedObject private var monitor = JobBoardMonitor.shared
+    let testResult: String?
+    let parsingStatus: String?
     @State private var isExpanded = false
     @State private var showingDeleteConfirmation = false
+
+    static func == (lhs: BoardConfigRow, rhs: BoardConfigRow) -> Bool {
+        lhs.config == rhs.config
+            && lhs.testingBoardId == rhs.testingBoardId
+            && lhs.testResult == rhs.testResult
+            && lhs.parsingStatus == rhs.parsingStatus
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -174,7 +188,7 @@ struct BoardConfigRow: View {
                         }
                     }
 
-                    if let testResult = monitor.testResults[config.id] {
+                    if let testResult {
                         let isSuccess = testResult.hasPrefix("Found")
                         let isLoading = testResult == "Testing..."
                         HStack(spacing: 4) {
@@ -192,7 +206,7 @@ struct BoardConfigRow: View {
                         }
                     }
 
-                    if let parsingStatus = monitor.parsingStatus[config.id] {
+                    if let parsingStatus {
                         Text(parsingStatus)
                             .font(.caption2)
                             .foregroundColor(.secondary)
@@ -228,7 +242,7 @@ struct BoardConfigRow: View {
                         set: { newValue in
                             var updated = config
                             updated.isEnabled = newValue
-                            monitor.updateBoardConfig(updated)
+                            JobBoardMonitor.shared.updateBoardConfig(updated)
                         }
                     ))
                     .toggleStyle(.switch)
@@ -320,7 +334,7 @@ struct BoardConfigRow: View {
     private func testBoard() {
         testingBoardId = config.id
         Task {
-            await monitor.testSingleBoard(config)
+            await JobBoardMonitor.shared.testSingleBoard(config)
             await MainActor.run {
                 testingBoardId = nil
             }
@@ -328,8 +342,8 @@ struct BoardConfigRow: View {
     }
 
     private func deleteBoard() {
-        if let index = monitor.boardConfigs.firstIndex(where: { $0.id == config.id }) {
-            monitor.removeBoardConfig(at: index)
+        if let index = JobBoardMonitor.shared.boardConfigs.firstIndex(where: { $0.id == config.id }) {
+            JobBoardMonitor.shared.removeBoardConfig(at: index)
         }
     }
 }

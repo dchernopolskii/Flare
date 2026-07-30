@@ -20,6 +20,7 @@ class JobBoardMonitor: ObservableObject {
     @Published var parsingStatus: [UUID: String] = [:]
     @Published var detectionStatus: String = ""
     @Published var detectionInProgress = false
+    @Published private(set) var activeFetchDescription: String?
 
     struct DetectionPreview: Identifiable {
         let id = UUID()
@@ -117,7 +118,12 @@ class JobBoardMonitor: ObservableObject {
         testResults[config.id] = "Testing..."
 
         do {
-            let jobs = try await fetchJobsFromBoard(config, titleFilter: "", locationFilter: "")
+            let jobs = try await fetchJobsFromBoard(
+                config,
+                titleFilter: "",
+                locationFilter: "",
+                allowLLMFallback: true
+            )
             testResults[config.id] = "Found \(jobs.count) jobs"
 
             var updatedConfig = config
@@ -664,17 +670,27 @@ class JobBoardMonitor: ObservableObject {
     func fetchAllBoardJobs(titleFilter: String = "", locationFilter: String = "") async -> [Job] {
         isMonitoring = true
         lastError = nil
+        defer {
+            isMonitoring = false
+            activeFetchDescription = nil
+        }
+
         var allJobs = [Job]()
         var errorMessages = [String]()
+        var fetchedBoardIDs = Set<UUID>()
+        let enabledConfigs = boardConfigs.filter { $0.isEnabled && $0.isSupported }
 
-        for config in boardConfigs where config.isEnabled && config.isSupported {
+        for (index, config) in enabledConfigs.enumerated() {
+            activeFetchDescription = "Fetching \(index + 1)/\(enabledConfigs.count): \(config.displayName) via \(fetchProviderDescription(for: config))"
             do {
-                let jobs = try await fetchJobsFromBoard(config, titleFilter: titleFilter, locationFilter: locationFilter)
+                let jobs = try await fetchJobsFromBoard(
+                    config,
+                    titleFilter: titleFilter,
+                    locationFilter: locationFilter,
+                    allowLLMFallback: false
+                )
                 allJobs.append(contentsOf: jobs)
-
-                var updatedConfig = config
-                updatedConfig.lastFetched = Date()
-                updateBoardConfig(updatedConfig)
+                fetchedBoardIDs.insert(config.id)
             } catch {
                 let errorMsg = "\(config.displayName): \(error.localizedDescription)"
                 errorMessages.append(errorMsg)
@@ -688,8 +704,25 @@ class JobBoardMonitor: ObservableObject {
             lastError = errorMessages.joined(separator: " | ")
         }
 
-        isMonitoring = false
+        if !fetchedBoardIDs.isEmpty {
+            let fetchedAt = Date()
+            boardConfigs = boardConfigs.map { config in
+                guard fetchedBoardIDs.contains(config.id) else { return config }
+                var updated = config
+                updated.lastFetched = fetchedAt
+                return updated
+            }
+            await saveConfigs()
+        }
+
         return allJobs
+    }
+
+    private func fetchProviderDescription(for config: JobBoardConfig) -> String {
+        if let atsType = config.detectedATSType, !atsType.isEmpty {
+            return atsType.capitalized
+        }
+        return config.source == .unknown ? "saved route" : config.source.rawValue
     }
     
     // MARK: - Import/Export
@@ -734,7 +767,12 @@ class JobBoardMonitor: ObservableObject {
     
     // MARK: - Private Methods
     
-    private func fetchJobsFromBoard(_ config: JobBoardConfig, titleFilter: String, locationFilter: String) async throws -> [Job] {
+    private func fetchJobsFromBoard(
+        _ config: JobBoardConfig,
+        titleFilter: String,
+        locationFilter: String,
+        allowLLMFallback: Bool
+    ) async throws -> [Job] {
         guard let url = URL(string: config.url) else {
             throw FetchError.invalidURL
         }
@@ -816,6 +854,7 @@ class JobBoardMonitor: ObservableObject {
                 from: url,
                 titleFilter: titleFilter,
                 locationFilter: locationFilter,
+                allowLLMFallback: allowLLMFallback,
                 statusCallback: { [weak self] status in
                     Task { @MainActor [weak self] in
                         self?.parsingStatus[configId] = status

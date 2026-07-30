@@ -23,12 +23,23 @@ final class MSJobMonitorUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testPrimaryNavigation() throws {
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        let showSidebarButton = app.buttons["sidebar.show"]
+        if showSidebarButton.waitForExistence(timeout: 1) {
+            showSidebarButton.click()
+        }
+
+        let jobsButton = app.buttons["sidebar.jobs"]
+        XCTAssertTrue(jobsButton.waitForExistence(timeout: 5))
+
+        app.buttons["sidebar.job-boards"].click()
+        XCTAssertTrue(app.staticTexts["Job Boards"].waitForExistence(timeout: 3))
+
+        app.buttons["sidebar.settings"].click()
+        XCTAssertTrue(app.buttons["settings.check-for-updates"].waitForExistence(timeout: 3))
     }
 
     @MainActor

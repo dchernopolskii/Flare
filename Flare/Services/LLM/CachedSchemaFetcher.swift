@@ -112,7 +112,7 @@ struct CachedSchemaFetcher {
                 let job = Job(
                     id: jobId,
                     title: title,
-                    location: parsed.location ?? "Remote",
+                    location: parsed.location ?? "Location not specified",
                     postingDate: nil,  // Use firstSeenDate instead
                     url: parsed.url ?? apiURL.absoluteString,
                     description: parsed.description ?? "",
@@ -174,21 +174,10 @@ struct CachedSchemaFetcher {
 
     /// Apply title and location filters
     private func applyFilters(_ jobs: [Job], titleFilter: String, locationFilter: String) -> [Job] {
-        var filtered = jobs
-
-        if !titleFilter.isEmpty {
-            filtered = filtered.filter {
-                $0.title.localizedCaseInsensitiveContains(titleFilter)
-            }
-        }
-
-        if !locationFilter.isEmpty {
-            filtered = filtered.filter {
-                $0.location.localizedCaseInsensitiveContains(locationFilter)
-            }
-        }
-
-        return filtered
+        jobs.applying(
+            titleKeywords: titleFilter.parseAsFilterKeywords(),
+            locationKeywords: locationFilter.parseAsFilterKeywords()
+        )
     }
 
     /// Generate a unique ID for a job (for tracking)

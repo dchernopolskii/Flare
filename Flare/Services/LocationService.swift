@@ -243,6 +243,73 @@ struct LocationService {
     }
 }
 
+enum LocationMatcher {
+    private static let remoteTerms = ["remote", "work from home", "distributed", "anywhere"]
+
+    // These are deliberately metro/state aliases, not country aliases. A Seattle
+    // preference should find a board that only says "Washington, USA", but it
+    // should not turn into a match for every job in the United States.
+    private static let aliases: [String: [String]] = [
+        "seattle": ["seattle", "greater seattle", "greater seattle area", "seattle metropolitan area", "puget sound", "king county", "washington", "wa"],
+        "redmond": ["redmond", "greater seattle", "puget sound", "king county", "washington", "wa"],
+        "bellevue": ["bellevue", "greater seattle", "puget sound", "king county", "washington", "wa"],
+        "washington": ["washington", "wa", "seattle", "redmond", "bellevue", "everett", "tacoma", "puget sound"],
+        "wa": ["washington", "wa", "seattle", "redmond", "bellevue", "everett", "tacoma", "puget sound"],
+        "san francisco": ["san francisco", "sf", "bay area", "silicon valley", "california", "ca"],
+        "sf": ["san francisco", "sf", "bay area", "silicon valley", "california", "ca"],
+        "new york": ["new york", "nyc", "new york city", "new york state", "ny"],
+        "nyc": ["new york", "nyc", "new york city", "new york state", "ny"],
+        "portland": ["portland", "oregon", "or"]
+    ]
+
+    static func matches(_ job: Job, locationKeywords: [String]) -> Bool {
+        let keywords = locationKeywords.map(normalize).filter { !$0.isEmpty }
+        guard !keywords.isEmpty else { return true }
+
+        let values = [job.location, job.workSiteFlexibility ?? ""]
+            .map(normalize)
+            .filter { !$0.isEmpty }
+
+        return keywords.contains { keyword in
+            if isRemoteKeyword(keyword) {
+                return values.contains { value in remoteTerms.contains { value.contains($0) } }
+            }
+
+            let candidates = aliases[keyword] ?? [keyword]
+            return candidates.contains { candidate in
+                values.contains { containsLocationTerm($0, term: candidate) }
+            }
+        }
+    }
+
+    static func physicalKeywords(from locationFilter: String) -> [String] {
+        locationFilter.parseAsFilterKeywords().filter { !isRemoteKeyword(normalize($0)) }
+    }
+
+    static func includesRemote(_ locationFilter: String) -> Bool {
+        locationFilter.parseAsFilterKeywords().contains { isRemoteKeyword(normalize($0)) }
+    }
+
+    private static func isRemoteKeyword(_ keyword: String) -> Bool {
+        remoteTerms.contains { keyword.contains($0) }
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value.lowercased()
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: ".", with: " ")
+            .split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == "/" })
+            .joined(separator: " ")
+    }
+
+    private static func containsLocationTerm(_ value: String, term: String) -> Bool {
+        guard term.count > 2 else {
+            return value.split(separator: " ").contains { String($0) == term }
+        }
+        return value.contains(term)
+    }
+}
+
 extension LocationService {
     
     // MARK: - Microsoft API Mapping
