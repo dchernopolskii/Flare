@@ -13,7 +13,7 @@
     {
       "identity" : "swiftllama",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/dchernopolskiy/SwiftLlama/",
+      "location" : "https://github.com/dchernopolskii/SwiftLlama/",
       "state" : {
         "branch" : "main",
         "revision" : "47307c02bdb2131006de37ddd0a5b428bc31ed47"

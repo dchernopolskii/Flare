@@ -633,7 +633,7 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		3718D7E82EE832F4005F0EDA /* XCRemoteSwiftPackageReference "SwiftLlama" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/dchernopolskiy/SwiftLlama/";
+			repositoryURL = "https://github.com/dchernopolskii/SwiftLlama/";
 			requirement = {
 				branch = main;
 				kind = branch;

@@ -15,7 +15,7 @@
 			</dict>
 		</dict>
 	<key>SUFeedURL</key>
-	<string>https://dchernopolskiy.github.io/Flare/Releases/appcast.xml</string>
+	<string>https://dchernopolskii.github.io/Flare/Releases/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>D9fnTujzQXXSsl0wwg40KmaHVJcdv4Zsh4bLZPkKs2U=</string>
 	<key>SUEnableAutomaticChecks</key>
