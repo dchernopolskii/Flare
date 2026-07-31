@@ -4,12 +4,12 @@
         <title>FlareJobMonitor</title>
         <item>
             <title>Flare 1.10</title>
-            <pubDate>Thu, 30 Jul 2026 16:51:16 -0700</pubDate>
+            <pubDate>Thu, 30 Jul 2026 17:15:37 -0700</pubDate>
             <sparkle:version>1.10</sparkle:version>
             <sparkle:shortVersionString>1.10</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.4</sparkle:minimumSystemVersion>
             <sparkle:releaseNotesLink>https://github.com/dchernopolskii/Flare/releases/tag/v1.10</sparkle:releaseNotesLink>
-            <enclosure url="https://github.com/dchernopolskii/Flare/releases/download/v1.10/FlareJobMonitor.zip" length="10629018" type="application/zip" sparkle:edSignature="zSuZ1HO0eK0PkZABsIFB4jSq4wuvlbaUdh2hzzAuEobuL5rXlzZrk00TRpbWGpZgznfJss4pz7jdJqOdd/oWDA=="/>
+            <enclosure url="https://github.com/dchernopolskii/Flare/releases/download/v1.10/FlareJobMonitor.zip" length="8349113" type="application/zip" sparkle:edSignature="2pKmhuSobKYOdcEuCoUjTVUq6gKE0ZV1+uhWmLPRs5Dwqz0ryAEZ+gnOj7UncctcRT261Bl5lMgXKAYUOCI+CA=="/>
         </item>
     </channel>
 </rss>
