@@ -66,6 +66,8 @@ struct ContentView: View {
                             )
                         } else if jobManager.selectedTab == "boards" {
                             JobBoardsView()
+                        } else if jobManager.selectedTab == "board-guide" {
+                            BoardGuideView()
                         } else {
                             SettingsView()
                         }

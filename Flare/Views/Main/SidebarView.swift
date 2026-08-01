@@ -76,6 +76,20 @@ struct SidebarView: View {
                         }
                     }
                 }
+
+                SidebarButton(
+                    title: "Board Guide",
+                    icon: "questionmark.circle",
+                    isSelected: jobManager.selectedTab == "board-guide"
+                ) {
+                    jobManager.selectedTab = "board-guide"
+                    jobManager.selectedJob = nil
+                    if isWindowMinimized {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            sidebarVisible = false
+                        }
+                    }
+                }
                 
                 SidebarButton(
                     title: "Settings",

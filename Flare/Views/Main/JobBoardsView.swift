@@ -714,6 +714,178 @@ struct SupportedPlatformsSection: View {
     }
 }
 
+// MARK: - Board Guide
+
+struct BoardGuideView: View {
+    private let atsExamples = [
+        ATSExample(name: "Workday", hosts: "company.wd1.myworkdayjobs.com", searchTerm: "Company Name careers Workday"),
+        ATSExample(name: "Greenhouse", hosts: "boards.greenhouse.io / job-boards.greenhouse.io", searchTerm: "Company Name careers Greenhouse"),
+        ATSExample(name: "Lever", hosts: "jobs.lever.co/company", searchTerm: "Company Name careers Lever"),
+        ATSExample(name: "Ashby", hosts: "jobs.ashbyhq.com/company", searchTerm: "Company Name careers Ashby"),
+        ATSExample(name: "BambooHR", hosts: "company.bamboohr.com/careers", searchTerm: "Company Name careers BambooHR")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Adding a Job Board")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(FlareVisual.ink)
+                Text("Find the public listing page, then let Flare identify the connection behind it.")
+                    .font(.callout)
+                    .foregroundStyle(FlareVisual.fadedInk)
+            }
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    GuideSection(title: "The quick path", icon: "bolt.fill") {
+                        GuideStep(number: 1, title: "Start with the company careers page", detail: "Open the page that lists all available jobs. Avoid a single job posting, a search engine result, or a page that requires a login.")
+                        GuideStep(number: 2, title: "Paste that URL into Job Boards", detail: "Flare checks known ATS patterns, page metadata, embedded data, and discovered API routes before using optional local AI parsing.")
+                        GuideStep(number: 3, title: "Review the preview", detail: "Confirm that the detected source and sample job count look right, then save the board.")
+                    }
+
+                    GuideSection(title: "Finding the ATS", icon: "magnifyingglass") {
+                        Text("If the company careers page does not work, search Google using the company name plus an ATS name:")
+                            .font(.callout)
+                            .foregroundStyle(FlareVisual.soot)
+
+                        VStack(spacing: 0) {
+                            ForEach(atsExamples) { example in
+                                ATSExampleRow(example: example)
+                                if example.id != atsExamples.last?.id {
+                                    Divider()
+                                }
+                            }
+                        }
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(FlareVisual.ink.opacity(0.16)))
+                    }
+
+                    GuideSection(title: "Inspecting the page", icon: "safari") {
+                        Text("Open the page source or Web Inspector and search for these names:")
+                            .font(.callout)
+                            .foregroundStyle(FlareVisual.soot)
+
+                        Text("workday  greenhouse  lever  ashby  bamboohr  icims  taleo")
+                            .font(.system(.callout, design: .monospaced).weight(.medium))
+                            .textSelection(.enabled)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(FlareVisual.paperShadow.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+
+                        Text("Look for a full careers or jobs URL near the match. Open it to confirm that it shows the company's listings, then paste that URL into Flare. In the Network tab, requests containing jobs, search, postings, api, or graphql can also reveal the underlying source.")
+                            .font(.callout)
+                            .foregroundStyle(FlareVisual.soot)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    GuideSection(title: "Common questions", icon: "questionmark.bubble") {
+                        GuideAnswer(question: "Should I paste a job posting?", answer: "Use the page that lists all jobs whenever possible. A single posting often omits the search endpoint Flare needs.")
+                        GuideAnswer(question: "Does adding a board always use the local model?", answer: "No. Known ATS routes and structured page data are tried first. The local model is only a fallback when AI parsing is enabled.")
+                        GuideAnswer(question: "What if detection finds no jobs?", answer: "Try the direct ATS URL, remove search filters from the URL, or enable AI parsing in Settings and run detection again.")
+                        GuideAnswer(question: "Is page content sent elsewhere?", answer: "The optional model runs locally. Flare still contacts the careers site and any job API it discovers to retrieve listings.")
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding()
+        .preferredColorScheme(.light)
+        .background(FlareVisual.canvas)
+    }
+}
+
+private struct ATSExample: Identifiable {
+    let name: String
+    let hosts: String
+    let searchTerm: String
+
+    var id: String { name }
+}
+
+private struct GuideSection<Content: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .foregroundStyle(FlareVisual.ink)
+            content
+        }
+        .padding(.bottom, 4)
+    }
+}
+
+private struct GuideStep: View {
+    let number: Int
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number)")
+                .font(.caption.bold())
+                .foregroundStyle(FlareVisual.paper)
+                .frame(width: 24, height: 24)
+                .background(FlareVisual.ember, in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(FlareVisual.fadedInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct ATSExampleRow: View {
+    let example: ATSExample
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(example.name)
+                .font(.callout.weight(.semibold))
+                .frame(width: 92, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(example.hosts)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                Text("Search: \(example.searchTerm)")
+                    .font(.caption)
+                    .foregroundStyle(FlareVisual.fadedInk)
+                    .textSelection(.enabled)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+    }
+}
+
+private struct GuideAnswer: View {
+    let question: String
+    let answer: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(question)
+                .font(.callout.weight(.semibold))
+            Text(answer)
+                .font(.caption)
+                .foregroundStyle(FlareVisual.fadedInk)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 // MARK: - File Document for Export
 
 struct JobBoardsDocument: FileDocument {
