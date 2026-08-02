@@ -746,6 +746,14 @@ struct BoardGuideView: View {
                         GuideStep(number: 3, title: "Review the preview", detail: "Confirm that the detected source and sample job count look right, then save the board.")
                     }
 
+                    GuideSection(title: "A real example", icon: "checkmark.seal") {
+                        Text("A company careers page can look completely custom. Paste the listing page, not the hidden provider URL—Flare can connect the two when it finds a supported board behind it.")
+                            .font(.callout)
+                            .foregroundStyle(FlareVisual.soot)
+
+                        BoardGuideExample()
+                    }
+
                     GuideSection(title: "Finding the ATS", icon: "magnifyingglass") {
                         Text("If the company careers page does not work, search Google using the company name plus an ATS name:")
                             .font(.callout)
@@ -842,6 +850,94 @@ private struct GuideStep: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+private struct BoardGuideExample: View {
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+                ExampleFrame(
+                    step: "01",
+                    title: "Paste the careers page",
+                    caption: "redditinc.com/careers",
+                    imageName: "BoardGuideCareerPage"
+                )
+
+                Image(systemName: "arrow.right")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(FlareVisual.ember)
+                    .padding(.top, 112)
+
+                ExampleFrame(
+                    step: "02",
+                    title: "Review Flare’s connection",
+                    caption: "Direct ATS · Greenhouse · 189 jobs",
+                    imageName: "BoardGuideDetection"
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                ExampleFrame(
+                    step: "01",
+                    title: "Paste the careers page",
+                    caption: "redditinc.com/careers",
+                    imageName: "BoardGuideCareerPage"
+                )
+
+                HStack(spacing: 8) {
+                    Rectangle()
+                        .fill(FlareVisual.ember.opacity(0.5))
+                        .frame(width: 1, height: 28)
+                    Image(systemName: "arrow.down")
+                        .foregroundStyle(FlareVisual.ember)
+                }
+                .padding(.leading, 18)
+
+                ExampleFrame(
+                    step: "02",
+                    title: "Review Flare’s connection",
+                    caption: "Direct ATS · Greenhouse · 189 jobs",
+                    imageName: "BoardGuideDetection"
+                )
+            }
+        }
+        .padding(14)
+        .background(FlareVisual.paperShadow.opacity(0.28), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(FlareVisual.ink.opacity(0.12), lineWidth: 1))
+    }
+}
+
+private struct ExampleFrame: View {
+    let step: String
+    let title: String
+    let caption: String
+    let imageName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Text(step)
+                    .font(.system(.caption2, design: .monospaced).weight(.bold))
+                    .foregroundStyle(FlareVisual.ember)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(FlareVisual.ink)
+            }
+
+            Image(imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: 235)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(FlareVisual.ink.opacity(0.16), lineWidth: 1))
+
+            Text(caption)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(FlareVisual.fadedInk)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

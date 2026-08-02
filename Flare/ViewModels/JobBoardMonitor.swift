@@ -261,14 +261,27 @@ class JobBoardMonitor: ObservableObject {
             )
 
             if !jobs.isEmpty {
+                if let candidate = directATSCandidates(from: jobs).first {
+                    await MainActor.run { detectionInProgress = false }
+                    return DetectionPreview(
+                        jobCount: jobs.count,
+                        parsingMethod: .directATS,
+                        queryURL: candidate.url.absoluteString,
+                        atsType: candidate.source.rawValue.lowercased(),
+                        evidenceSummary: "Verified \(candidate.source.rawValue) job links while analyzing the careers page."
+                    )
+                }
+
                 let method = determineParsingMethod(from: jobs)
                 await MainActor.run { detectionInProgress = false }
                 return DetectionPreview(
                     jobCount: jobs.count,
-                    parsingMethod: method.rawValue.contains("AI") ? method : .llmExtraction,
+                    parsingMethod: method,
                     queryURL: urlString,
                     atsType: nil,
-                    evidenceSummary: "Confirmed by the page parser after deterministic checks found no compatible ATS."
+                    evidenceSummary: method == .llmExtraction
+                        ? "Confirmed by AI analysis after deterministic checks found no compatible ATS."
+                        : "Confirmed by the page's structured job data."
                 )
             }
         }
