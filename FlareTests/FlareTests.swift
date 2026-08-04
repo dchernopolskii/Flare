@@ -172,6 +172,11 @@ struct JobSourceTests {
         #expect(source == .bamboohr)
     }
 
+    @Test func detectCapgeminiAndEightfoldFromURLs() async throws {
+        #expect(JobSource.detectFromURL("https://www.capgemini.com/careers") == .capgemini)
+        #expect(JobSource.detectFromURL("https://explore.jobs.netflix.net/api/apply/v2/jobs?domain=netflix.com") == .eightfold)
+    }
+
     @Test func unknownSourceForCustomURL() async throws {
         let url = "https://careers.netflix.com/jobs"
         let source = JobSource.detectFromURL(url)
@@ -232,6 +237,18 @@ struct JobBoardConfigTests {
         )
 
         #expect(config?.effectiveURL == "https://careers.company.com")
+    }
+
+    @Test func detectedEightfoldTypeOverridesCustomCareersHost() async throws {
+        let config = JobBoardConfig(
+            name: "Netflix",
+            url: "https://explore.jobs.netflix.net/careers",
+            detectedATSURL: "https://explore.jobs.netflix.net/api/apply/v2/jobs?domain=netflix.com",
+            detectedATSType: "eightfold",
+            parsingMethod: .directATS
+        )
+
+        #expect(config?.source == .eightfold)
     }
 }
 
@@ -574,6 +591,104 @@ struct BambooHRFetcherTests {
         #expect(jobs.first?.url == "https://acme.bamboohr.com/careers/42")
         #expect(jobs.first?.workSiteFlexibility == "Remote")
         #expect(jobs.first?.source == .bamboohr)
+    }
+}
+
+@Suite(.serialized)
+struct EightfoldFetcherTests {
+    private func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FetcherURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    @Test func normalizesEndpointAndFetchesEveryPage() async throws {
+        FetcherURLProtocol.reset { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let start = Int(components?.queryItems?.first(where: { $0.name == "start" })?.value ?? "0") ?? 0
+            let count = start == 0 ? 10 : 2
+            let positions = (start..<(start + count)).map { index in
+                [
+                    "id": index,
+                    "name": "Position \(index)",
+                    "locations": ["Remote"],
+                    "canonicalPositionUrl": "https://explore.jobs.netflix.net/careers/job/\(index)"
+                ] as [String: Any]
+            }
+            let data = try JSONSerialization.data(withJSONObject: ["count": 12, "positions": positions])
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+
+        let jobs = try await EightfoldFetcher(session: makeSession()).fetchJobs(
+            from: URL(string: "https://explore.jobs.netflix.net/api/apply/v2/jobs/123/jobs?domain=netflix.com")!
+        )
+
+        #expect(jobs.count == 12)
+        #expect(jobs.allSatisfy { $0.source == .eightfold })
+        #expect(FetcherURLProtocol.requests.count == 2)
+        #expect(FetcherURLProtocol.requests.allSatisfy { $0.path == "/api/apply/v2/jobs" })
+        #expect(FetcherURLProtocol.requests.compactMap {
+            URLComponents(url: $0, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "start" })?.value
+        } == ["0", "10"])
+    }
+}
+
+@Suite(.serialized)
+struct CapgeminiJobStreamFetcherTests {
+    private func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FetcherURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
+    @Test func preservesCountryFilterAndPaginatesFeed() async throws {
+        FetcherURLProtocol.reset { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Type": request.url?.path.contains("job-search") == true ? "application/json" : "text/html"]
+            )!
+
+            if request.url?.path.contains("job-search") == true {
+                let page = Int(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "page" })?.value ?? "1") ?? 1
+                let itemCount = page == 1 ? 100 : 1
+                let start = (page - 1) * 100
+                let listings = (start..<(start + itemCount)).map { index in
+                    [
+                        "id": "job-\(index)",
+                        "title": "Role \(index)",
+                        "location": "Seattle",
+                        "ref": "ref-\(index)",
+                        "source": "SAP"
+                    ]
+                }
+                let data = try JSONSerialization.data(withJSONObject: ["count": 101, "data": listings])
+                return (response, data)
+            }
+
+            let html = #"<script>cg_jobs_jobstream_url = "https://cg-jobstream-api.azurewebsites.net/api";</script>"#
+            return (response, Data(html.utf8))
+        }
+
+        let fetcher = CapgeminiJobStreamFetcher(session: makeSession())
+        let careersURL = URL(string: "https://www.capgemini.com/careers/jobs?country_code=us-en")!
+        let endpoint = try await fetcher.endpoint(for: careersURL)
+        let jobs = try await fetcher.fetchJobs(from: endpoint)
+
+        #expect(endpoint.absoluteString == "https://cg-jobstream-api.azurewebsites.net/api/job-search?country_code=us-en")
+        #expect(jobs.count == 101)
+        #expect(jobs.allSatisfy { $0.source == .capgemini })
+        let pageRequests = FetcherURLProtocol.requests.filter { $0.path.contains("job-search") }
+        #expect(pageRequests.count == 2)
+        #expect(pageRequests.allSatisfy {
+            URLComponents(url: $0, resolvingAgainstBaseURL: false)?
+                .queryItems?.contains(URLQueryItem(name: "country_code", value: "us-en")) == true
+        })
     }
 }
 

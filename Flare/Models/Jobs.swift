@@ -240,7 +240,9 @@ enum JobSource: String, Codable, CaseIterable, Equatable {
     case snap = "Snap"
     case amd = "AMD"
     case meta = "Meta"
+    case capgemini = "Capgemini"
     case workday = "Workday"
+    case eightfold = "Eightfold"
     case greenhouse = "Greenhouse"
     case workable = "Workable"
     case jobvite = "Jobvite"
@@ -265,7 +267,9 @@ enum JobSource: String, Codable, CaseIterable, Equatable {
         case .snap: return "camera.fill"
         case .amd: return "cpu.fill"
         case .meta: return "infinity"
+        case .capgemini: return "wave.3.right"
         case .workday: return "briefcase.fill"
+        case .eightfold: return "square.stack.3d.up.fill"
         case .greenhouse: return "leaf.fill"
         case .workable: return "briefcase.circle.fill"
         case .jobvite: return "person.3.fill"
@@ -291,7 +295,9 @@ enum JobSource: String, Codable, CaseIterable, Equatable {
         case .tiktok: return .pink
         case .snap: return .yellow
         case .amd: return .red
+        case .capgemini: return .cyan
         case .workday: return .purple
+        case .eightfold: return .indigo
         case .meta: return .blue
         case .greenhouse: return .green
         case .workable: return .purple
@@ -327,7 +333,7 @@ enum JobSource: String, Codable, CaseIterable, Equatable {
     var isSupported: Bool {
         switch self {
         case .microsoft, .apple, .google, .tiktok, .greenhouse,
-             .ashby, .lever, .snap, .amd, .meta, .workday, .bamboohr, .icims, .taleo, .unknown:
+             .ashby, .lever, .snap, .amd, .meta, .capgemini, .workday, .eightfold, .bamboohr, .icims, .taleo, .unknown:
             return true
         default:
             return false
@@ -353,8 +359,12 @@ enum JobSource: String, Codable, CaseIterable, Equatable {
             return .amd
         } else if lowercased.contains("www.metacareers.com") {
             return .meta
+        } else if lowercased.contains("capgemini.com") || lowercased.contains("cg-jobstream-api.azurewebsites.net") {
+            return .capgemini
         } else if lowercased.contains("myworkdayjobs.com") || lowercased.contains(".wd") {
             return .workday
+        } else if lowercased.contains("/api/apply/v2/jobs") || lowercased.contains("smartapply") {
+            return .eightfold
         } else if lowercased.contains("greenhouse.io") {
             return .greenhouse
         } else if lowercased.contains("workable.com") {

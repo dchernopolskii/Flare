@@ -13,7 +13,7 @@ struct JobListView: View {
     let isWindowMinimized: Bool
 
     @State private var searchText = ""
-    @State private var selectedSources: Set<JobSource> = Set([.microsoft, .apple, .google, .tiktok, .snap, .amd, .meta, .greenhouse, .lever, .ashby, .workday, .icims, .taleo, .unknown].filter { $0.isSupported })
+    @State private var selectedSources: Set<JobSource> = Set([.microsoft, .apple, .google, .tiktok, .snap, .amd, .meta, .capgemini, .greenhouse, .lever, .ashby, .workday, .eightfold, .bamboohr, .icims, .taleo, .unknown].filter { $0.isSupported })
     @State private var showOnlyStarred = false
     @State private var showOnlyApplied = false
     @State private var allFilteredJobs: [Job] = []
@@ -180,7 +180,7 @@ struct JobListHeader: View {
     @Binding var showOnlyApplied: Bool
 
     private var supportedSources: [JobSource] {
-        [.microsoft, .apple, .google, .tiktok, .snap, .amd, .meta, .greenhouse, .lever, .ashby, .workday, .icims, .taleo, .unknown]
+        [.microsoft, .apple, .google, .tiktok, .snap, .amd, .meta, .capgemini, .greenhouse, .lever, .ashby, .workday, .eightfold, .bamboohr, .icims, .taleo, .unknown]
             .filter { $0.isSupported }.sorted { $0.rawValue < $1.rawValue }
     }
 

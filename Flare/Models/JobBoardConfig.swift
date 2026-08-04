@@ -78,7 +78,7 @@ struct JobBoardConfig: Identifiable, Codable, Equatable {
 
         self.name = name
         self.url = normalizedURL
-        self.source = detectedSource
+        self.source = detectedATSType?.lowercased() == "eightfold" ? .eightfold : detectedSource
         self.isEnabled = isEnabled
         self.detectedATSURL = normalizedATSURL
         self.detectedATSType = detectedATSType

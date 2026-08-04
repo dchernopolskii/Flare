@@ -36,6 +36,8 @@ class JobBoardMonitor: ObservableObject {
     private let ashbyFetcher = AshbyFetcher()
     private let leverFetcher = LeverFetcher()
     private let workdayFetcher = WorkdayFetcher()
+    private let eightfoldFetcher = EightfoldFetcher()
+    private let capgeminiFetcher = CapgeminiJobStreamFetcher()
     private let bambooHRFetcher = BambooHRFetcher()
     private let icimsFetcher = iCIMSFetcher()
     private let taleoFetcher = TaleoFetcher()
@@ -129,6 +131,10 @@ class JobBoardMonitor: ObservableObject {
 
             var updatedConfig = config
             updatedConfig.lastFetched = Date()
+            updatedConfig.lastJobCount = jobs.count
+            if updatedConfig.parsingMethod == nil {
+                updatedConfig.parsingMethod = parsingMethod(for: updatedConfig, jobs: jobs)
+            }
             updateBoardConfig(updatedConfig)
         } catch {
             testResults[config.id] = "Error: \(error.localizedDescription)"
@@ -166,6 +172,16 @@ class JobBoardMonitor: ObservableObject {
         }
 
         await MainActor.run { detectionStatus = "Checking for API patterns..." }
+        if let eightfoldResult = await tryEightfoldAPIDetection(url: url) {
+            await MainActor.run { detectionInProgress = false }
+            return eightfoldResult
+        }
+
+        if let capgeminiResult = await tryCapgeminiAPIDetection(url: url) {
+            await MainActor.run { detectionInProgress = false }
+            return capgeminiResult
+        }
+
         if let radancyResult = await tryRadancyAPIDetection(url: url) {
             await MainActor.run { detectionInProgress = false }
             return radancyResult
@@ -351,6 +367,44 @@ class JobBoardMonitor: ObservableObject {
         }
 
         return nil
+    }
+
+    private func tryEightfoldAPIDetection(url: URL) async -> DetectionPreview? {
+        do {
+            let endpoint = try await eightfoldFetcher.endpoint(for: url)
+            await MainActor.run { detectionStatus = "Fetching complete Eightfold job feed..." }
+            let jobs = try await eightfoldFetcher.fetchJobs(from: endpoint)
+            guard !jobs.isEmpty else { return nil }
+
+            return DetectionPreview(
+                jobCount: jobs.count,
+                parsingMethod: .directATS,
+                queryURL: endpoint.absoluteString,
+                atsType: "eightfold",
+                evidenceSummary: "Verified a paginated Eightfold job feed."
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func tryCapgeminiAPIDetection(url: URL) async -> DetectionPreview? {
+        do {
+            let endpoint = try await capgeminiFetcher.endpoint(for: url)
+            await MainActor.run { detectionStatus = "Fetching Capgemini job feed..." }
+            let jobs = try await capgeminiFetcher.fetchJobs(from: url)
+            guard !jobs.isEmpty else { return nil }
+
+            return DetectionPreview(
+                jobCount: jobs.count,
+                parsingMethod: .apiDiscovery,
+                queryURL: endpoint.absoluteString,
+                atsType: "capgemini",
+                evidenceSummary: "Verified Capgemini's public JobStream API."
+            )
+        } catch {
+            return nil
+        }
     }
 
     private func summary(of evidence: [ATSDetectorService.DetectionResult.Evidence]) -> String? {
@@ -731,6 +785,10 @@ class JobBoardMonitor: ObservableObject {
             return try await leverFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
         case .workday:
             return try await workdayFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
+        case .capgemini:
+            return try await capgeminiFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
+        case .eightfold:
+            return try await eightfoldFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
         case .bamboohr:
             return try await bambooHRFetcher.fetchJobs(from: url, titleFilter: "", locationFilter: "")
         case .icims:
@@ -752,6 +810,13 @@ class JobBoardMonitor: ObservableObject {
         return .unknown
     }
 
+    private func parsingMethod(for config: JobBoardConfig, jobs: [Job]) -> ParsingMethod {
+        if config.detectedATSType != nil {
+            return .directATS
+        }
+        return determineParsingMethod(from: jobs)
+    }
+
     func fetchAllBoardJobs(titleFilter: String = "", locationFilter: String = "") async -> [Job] {
         isMonitoring = true
         lastError = nil
@@ -762,7 +827,7 @@ class JobBoardMonitor: ObservableObject {
 
         var allJobs = [Job]()
         var errorMessages = [String]()
-        var fetchedBoardIDs = Set<UUID>()
+        var fetchedBoardJobs = [UUID: [Job]]()
         let enabledConfigs = boardConfigs.filter { $0.isEnabled && $0.isSupported }
 
         for (index, config) in enabledConfigs.enumerated() {
@@ -775,7 +840,7 @@ class JobBoardMonitor: ObservableObject {
                     allowLLMFallback: false
                 )
                 allJobs.append(contentsOf: jobs)
-                fetchedBoardIDs.insert(config.id)
+                fetchedBoardJobs[config.id] = jobs
             } catch {
                 let errorMsg = "\(config.displayName): \(error.localizedDescription)"
                 errorMessages.append(errorMsg)
@@ -789,12 +854,16 @@ class JobBoardMonitor: ObservableObject {
             lastError = errorMessages.joined(separator: " | ")
         }
 
-        if !fetchedBoardIDs.isEmpty {
+        if !fetchedBoardJobs.isEmpty {
             let fetchedAt = Date()
             boardConfigs = boardConfigs.map { config in
-                guard fetchedBoardIDs.contains(config.id) else { return config }
+                guard let jobs = fetchedBoardJobs[config.id] else { return config }
                 var updated = config
                 updated.lastFetched = fetchedAt
+                updated.lastJobCount = jobs.count
+                if updated.parsingMethod == nil {
+                    updated.parsingMethod = parsingMethod(for: updated, jobs: jobs)
+                }
                 return updated
             }
             await saveConfigs()
@@ -885,6 +954,10 @@ class JobBoardMonitor: ObservableObject {
             switch detectedATSType.lowercased() {
             case "workday":
                 jobs = try await workdayFetcher.fetchJobs(from: atsURL, titleFilter: titleFilter, locationFilter: locationFilter)
+            case "capgemini":
+                jobs = try await capgeminiFetcher.fetchJobs(from: atsURL, titleFilter: titleFilter, locationFilter: locationFilter)
+            case "eightfold":
+                jobs = try await eightfoldFetcher.fetchJobs(from: atsURL, titleFilter: titleFilter, locationFilter: locationFilter)
             case "greenhouse":
                 jobs = try await greenhouseFetcher.fetchGreenhouseJobs(from: atsURL, titleFilter: titleFilter, locationFilter: locationFilter)
             case "lever":
@@ -929,6 +1002,10 @@ class JobBoardMonitor: ObservableObject {
             return try await leverFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
         case .workday:
             return try await workdayFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
+        case .capgemini:
+            return try await capgeminiFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
+        case .eightfold:
+            return try await eightfoldFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
         case .icims:
             return try await icimsFetcher.fetchJobs(from: url, titleFilter: titleFilter, locationFilter: locationFilter)
         case .taleo:

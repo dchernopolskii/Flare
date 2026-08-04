@@ -12,6 +12,7 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
 
     private let llmParser = LLMParser.shared
     private let session: URLSession
+    private let eightfoldFetcher = EightfoldFetcher()
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -39,6 +40,12 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
 
     private func extractFromJSON(url: URL) async throws -> (html: String, jobs: [Job]) {
         let html = try await fetchHTML(from: url)
+
+        if html.range(of: "smartApplyData", options: .caseInsensitive) != nil,
+           let jobs = try? await eightfoldFetcher.fetchJobs(from: url),
+           !jobs.isEmpty {
+            return (html, jobs)
+        }
 
         var allJobs: [Job] = []
 
