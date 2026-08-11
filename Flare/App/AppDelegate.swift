@@ -10,7 +10,9 @@ import Foundation
 import Combine
 import UserNotifications
 import AppKit
+#if !APP_STORE
 import Sparkle
+#endif
 
 
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
@@ -19,10 +21,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// Set by SwiftUI on first window appear — the only reliable way to show/recreate
     /// a SwiftUI Window scene from outside the view hierarchy.
     var openMainWindow: (() -> Void)?
+#if !APP_STORE
     private var updaterController: SPUStandardUpdaterController?
+#endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusBar()
+#if !APP_STORE
         setupSparkle()
 
         NotificationCenter.default.addObserver(
@@ -31,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             name: NSNotification.Name("UpdateCheckPreferenceChanged"),
             object: nil
         )
+#endif
 
         Task {
             await JobManager.shared.startMonitoring()
@@ -76,6 +82,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         showMainWindow()
     }
 
+#if !APP_STORE
     private func setupSparkle() {
         updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
         Task { @MainActor in
@@ -102,4 +109,5 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self.syncAutomaticUpdateChecks()
         }
     }
+#endif
 }

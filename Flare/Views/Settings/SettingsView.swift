@@ -220,6 +220,12 @@ struct SettingsView: View {
                         }
                     }
 
+#if APP_STORE
+                    SettingsSection(title: "App Updates", icon: "arrow.down.app", subtitle: "Updates are delivered through the Mac App Store.") {
+                        Label("Flare updates automatically with your App Store settings.", systemImage: "checkmark.seal")
+                            .foregroundColor(.secondary)
+                    }
+#else
                     SettingsSection(title: "App Updates", icon: "arrow.down.app", subtitle: "Keep Flare current without interrupting your workflow.") {
                         VStack(alignment: .leading, spacing: 12) {
                             Toggle(isOn: $autoCheckForUpdates) {
@@ -244,6 +250,7 @@ struct SettingsView: View {
                             }
                         }
                     }
+#endif
 
                     SettingsSection(title: "Support", icon: "heart", subtitle: "Help keep Flare moving.") {
                         VStack(alignment: .leading, spacing: 12) {
@@ -272,6 +279,17 @@ struct SettingsView: View {
                                 .buttonStyle(.borderedProminent)
                                 .tint(.orange)
                             }
+
+                            Divider()
+
+                            Button {
+                                if let url = URL(string: "https://github.com/dchernopolskii/Flare/blob/main/PRIVACY.md") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            } label: {
+                                Label("Privacy Policy", systemImage: "hand.raised")
+                            }
+                            .buttonStyle(.link)
                         }
                     }
                     
@@ -479,7 +497,9 @@ struct SettingsView: View {
         enableMeta = jobManager.enableMeta
         enableCustomBoards = jobManager.enableCustomBoards
         includeRemoteJobs = jobManager.includeRemoteJobs
+#if !APP_STORE
         autoCheckForUpdates = jobManager.autoCheckForUpdates
+#endif
         enableAIParser = jobManager.enableAIParser
 
         Task {
@@ -501,7 +521,9 @@ struct SettingsView: View {
         jobManager.enableMeta = enableMeta
         jobManager.enableCustomBoards = enableCustomBoards
         jobManager.includeRemoteJobs = includeRemoteJobs
+#if !APP_STORE
         jobManager.autoCheckForUpdates = autoCheckForUpdates
+#endif
         jobManager.enableAIParser = enableAIParser
 
         Task {
@@ -513,11 +535,13 @@ struct SettingsView: View {
         }
     }
 
+#if !APP_STORE
     private func checkForUpdatesManually() {
         print("[Settings] Check for updates button pressed")
         print("[Settings] Calling appDelegate.checkForUpdatesNow()")
         appDelegate.checkForUpdatesNow()
     }
+#endif
 
     // MARK: - AI Model Management
 

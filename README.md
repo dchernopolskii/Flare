@@ -29,3 +29,5 @@ Settings:
 <p align="center">
 <img width="1225" height="768" alt="Flare v1.10 settings for sources, local AI parsing, filters and refresh behavior" src="docs/screenshots/flare-v1.9-settings.jpg" />
 </p>
+
+[Privacy policy](PRIVACY.md)

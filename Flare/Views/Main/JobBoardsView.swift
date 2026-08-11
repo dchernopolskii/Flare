@@ -101,7 +101,14 @@ struct JobBoardsView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-            
+
+            let hasSecurityScope = url.startAccessingSecurityScopedResource()
+            defer {
+                if hasSecurityScope {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
             do {
                 let content = try String(contentsOf: url, encoding: .utf8)
                 let result = monitor.importBoards(from: content)
