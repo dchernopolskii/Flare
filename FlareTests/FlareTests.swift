@@ -472,225 +472,229 @@ private final class BambooHRURLProtocol: URLProtocol, @unchecked Sendable {
 }
 
 @Suite(.serialized)
-struct UniversalJobFetcherTests {
-    private func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [FetcherURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
-
-    private static func response(
-        for request: URLRequest,
-        contentType: String = "text/html",
-        statusCode: Int = 200
-    ) -> HTTPURLResponse {
-        HTTPURLResponse(
-            url: request.url!,
-            statusCode: statusCode,
-            httpVersion: nil,
-            headerFields: ["Content-Type": contentType]
-        )!
-    }
-
-    @Test func structuredHTMLStopsBeforeAPIDiscovery() async throws {
-        let html = """
-        <html><script type="application/ld+json">
-        {
-          "@type": "JobPosting",
-          "title": "Senior Test Engineer",
-          "url": "/jobs/42",
-          "jobLocation": {"address": {"addressLocality": "Seattle", "addressRegion": "WA"}}
-        }
-        </script></html>
-        """
-
-        FetcherURLProtocol.reset { request in
-            (Self.response(for: request), Data(html.utf8))
+struct URLProtocolFetcherTests {
+    @Suite
+    struct UniversalJobFetcherTests {
+        private func makeSession() -> URLSession {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [FetcherURLProtocol.self]
+            return URLSession(configuration: configuration)
         }
 
-        let jobs = try await UniversalJobFetcher(session: makeSession())
-            .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
-
-        #expect(jobs.count == 1)
-        #expect(jobs.first?.title == "Senior Test Engineer")
-        #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings"])
-    }
-
-    @Test func inlineAPIRouteRunsOnlyAfterEmptyHTML() async throws {
-        let html = #"<html><script>fetch('/api/jobs')</script></html>"#
-        let apiJSON = #"[{"id":"job-1","title":"Product Designer","location":"Remote","url":"/jobs/job-1"}]"#
-
-        FetcherURLProtocol.reset { request in
-            if request.url?.path == "/api/jobs" {
-                return (Self.response(for: request, contentType: "application/json"), Data(apiJSON.utf8))
-            }
-            return (Self.response(for: request), Data(html.utf8))
-        }
-
-        let jobs = try await UniversalJobFetcher(session: makeSession())
-            .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
-
-        #expect(jobs.count == 1)
-        #expect(jobs.first?.title == "Product Designer")
-        #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings", "/api/jobs"])
-    }
-
-    @Test func genericAPIDiscoveryStopsAtFirstWorkingRoute() async throws {
-        let apiJSON = #"{"jobs":[{"id":"job-2","title":"Data Engineer","location":"Portland","url":"/jobs/job-2"}]}"#
-
-        FetcherURLProtocol.reset { request in
-            if request.url?.path == "/api/jobs" {
-                return (Self.response(for: request, contentType: "application/json"), Data(apiJSON.utf8))
-            }
-            return (Self.response(for: request), Data("<html></html>".utf8))
-        }
-
-        let jobs = try await UniversalJobFetcher(session: makeSession())
-            .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
-
-        #expect(jobs.count == 1)
-        #expect(jobs.first?.title == "Data Engineer")
-        #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings", "/api/jobs"])
-    }
-}
-
-@Suite(.serialized)
-struct BambooHRFetcherTests {
-    private func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [BambooHRURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
-
-    @Test func usesCareersListEndpointAndMapsOpenings() async throws {
-        let payload = #"""
-        {
-          "result": [{
-            "id": "42",
-            "jobOpeningName": "Product Manager",
-            "departmentLabel": "Product",
-            "employmentStatusLabel": "Full-Time",
-            "location": {"city": "Seattle", "state": "WA"},
-            "atsLocation": {"country": "United States"},
-            "isRemote": true
-          }]
-        }
-        """#
-
-        BambooHRURLProtocol.reset(responseData: Data(payload.utf8))
-
-        let jobs = try await BambooHRFetcher(session: makeSession()).fetchJobs(
-            from: URL(string: "https://acme.bamboohr.com/careers/jobs/42?source=test")!
-        )
-
-        #expect(BambooHRURLProtocol.requests.map(\.absoluteString) == ["https://acme.bamboohr.com/careers/list"])
-        #expect(jobs.count == 1)
-        #expect(jobs.first?.id == "bamboohr-acme-42")
-        #expect(jobs.first?.title == "Product Manager")
-        #expect(jobs.first?.location == "Seattle, WA, United States")
-        #expect(jobs.first?.url == "https://acme.bamboohr.com/careers/42")
-        #expect(jobs.first?.workSiteFlexibility == "Remote")
-        #expect(jobs.first?.source == .bamboohr)
-    }
-}
-
-@Suite(.serialized)
-struct EightfoldFetcherTests {
-    private func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [FetcherURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
-
-    @Test func normalizesEndpointAndFetchesEveryPage() async throws {
-        FetcherURLProtocol.reset { request in
-            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
-            let start = Int(components?.queryItems?.first(where: { $0.name == "start" })?.value ?? "0") ?? 0
-            let count = start == 0 ? 10 : 2
-            let positions = (start..<(start + count)).map { index in
-                [
-                    "id": index,
-                    "name": "Position \(index)",
-                    "locations": ["Remote"],
-                    "canonicalPositionUrl": "https://explore.jobs.netflix.net/careers/job/\(index)"
-                ] as [String: Any]
-            }
-            let data = try JSONSerialization.data(withJSONObject: ["count": 12, "positions": positions])
-            let response = HTTPURLResponse(
-                url: request.url!, statusCode: 200, httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
+        private static func response(
+            for request: URLRequest,
+            contentType: String = "text/html",
+            statusCode: Int = 200
+        ) -> HTTPURLResponse {
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: ["Content-Type": contentType]
             )!
-            return (response, data)
         }
 
-        let jobs = try await EightfoldFetcher(session: makeSession()).fetchJobs(
-            from: URL(string: "https://explore.jobs.netflix.net/api/apply/v2/jobs/123/jobs?domain=netflix.com")!
-        )
+        @Test func structuredHTMLStopsBeforeAPIDiscovery() async throws {
+            let html = """
+            <html><script type="application/ld+json">
+            {
+              "@type": "JobPosting",
+              "title": "Senior Test Engineer",
+              "url": "/jobs/42",
+              "jobLocation": {"address": {"addressLocality": "Seattle", "addressRegion": "WA"}}
+            }
+            </script></html>
+            """
 
-        #expect(jobs.count == 12)
-        #expect(jobs.allSatisfy { $0.source == .eightfold })
-        #expect(FetcherURLProtocol.requests.count == 2)
-        #expect(FetcherURLProtocol.requests.allSatisfy { $0.path == "/api/apply/v2/jobs" })
-        #expect(FetcherURLProtocol.requests.compactMap {
-            URLComponents(url: $0, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "start" })?.value
-        } == ["0", "10"])
-    }
-}
+            FetcherURLProtocol.reset { request in
+                (Self.response(for: request), Data(html.utf8))
+            }
 
-@Suite(.serialized)
-struct CapgeminiJobStreamFetcherTests {
-    private func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [FetcherURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
+            let jobs = try await UniversalJobFetcher(session: makeSession())
+                .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
 
-    @Test func preservesCountryFilterAndPaginatesFeed() async throws {
-        FetcherURLProtocol.reset { request in
-            let response = HTTPURLResponse(
-                url: request.url!, statusCode: 200, httpVersion: nil,
-                headerFields: ["Content-Type": request.url?.path.contains("job-search") == true ? "application/json" : "text/html"]
-            )!
+            #expect(jobs.count == 1)
+            #expect(jobs.first?.title == "Senior Test Engineer")
+            #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings"])
+        }
 
-            if request.url?.path.contains("job-search") == true {
-                let page = Int(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
-                    .queryItems?.first(where: { $0.name == "page" })?.value ?? "1") ?? 1
-                let itemCount = page == 1 ? 100 : 1
-                let start = (page - 1) * 100
-                let listings = (start..<(start + itemCount)).map { index in
-                    [
-                        "id": "job-\(index)",
-                        "title": "Role \(index)",
-                        "location": "Seattle",
-                        "ref": "ref-\(index)",
-                        "source": "SAP"
-                    ]
+        @Test func inlineAPIRouteRunsOnlyAfterEmptyHTML() async throws {
+            let html = #"<html><script>fetch('/api/jobs')</script></html>"#
+            let apiJSON = #"[{"id":"job-1","title":"Product Designer","location":"Remote","url":"/jobs/job-1"}]"#
+
+            FetcherURLProtocol.reset { request in
+                if request.url?.path == "/api/jobs" {
+                    return (Self.response(for: request, contentType: "application/json"), Data(apiJSON.utf8))
                 }
-                let data = try JSONSerialization.data(withJSONObject: ["count": 101, "data": listings])
+                return (Self.response(for: request), Data(html.utf8))
+            }
+
+            let jobs = try await UniversalJobFetcher(session: makeSession())
+                .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
+
+            #expect(jobs.count == 1)
+            #expect(jobs.first?.title == "Product Designer")
+            #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings", "/api/jobs"])
+        }
+
+        @Test func genericAPIDiscoveryStopsAtFirstWorkingRoute() async throws {
+            let apiJSON = #"{"jobs":[{"id":"job-2","title":"Data Engineer","location":"Portland","url":"/jobs/job-2"}]}"#
+
+            FetcherURLProtocol.reset { request in
+                if request.url?.path == "/api/jobs" {
+                    return (Self.response(for: request, contentType: "application/json"), Data(apiJSON.utf8))
+                }
+                return (Self.response(for: request), Data("<html></html>".utf8))
+            }
+
+            let jobs = try await UniversalJobFetcher(session: makeSession())
+                .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
+
+            #expect(jobs.count == 1)
+            #expect(jobs.first?.title == "Data Engineer")
+            #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings", "/api/jobs"])
+        }
+    }
+
+    @Suite
+    struct BambooHRFetcherTests {
+        private func makeSession() -> URLSession {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [BambooHRURLProtocol.self]
+            return URLSession(configuration: configuration)
+        }
+
+        @Test func usesCareersListEndpointAndMapsOpenings() async throws {
+            let payload = #"""
+            {
+              "result": [{
+                "id": "42",
+                "jobOpeningName": "Product Manager",
+                "departmentLabel": "Product",
+                "employmentStatusLabel": "Full-Time",
+                "location": {"city": "Seattle", "state": "WA"},
+                "atsLocation": {"country": "United States"},
+                "isRemote": true
+              }]
+            }
+            """#
+
+            BambooHRURLProtocol.reset(responseData: Data(payload.utf8))
+
+            let jobs = try await BambooHRFetcher(session: makeSession()).fetchJobs(
+                from: URL(string: "https://acme.bamboohr.com/careers/jobs/42?source=test")!
+            )
+
+            #expect(BambooHRURLProtocol.requests.map(\.absoluteString) == ["https://acme.bamboohr.com/careers/list"])
+            #expect(jobs.count == 1)
+            #expect(jobs.first?.id == "bamboohr-acme-42")
+            #expect(jobs.first?.title == "Product Manager")
+            #expect(jobs.first?.location == "Seattle, WA, United States")
+            #expect(jobs.first?.url == "https://acme.bamboohr.com/careers/42")
+            #expect(jobs.first?.workSiteFlexibility == "Remote")
+            #expect(jobs.first?.source == .bamboohr)
+        }
+    }
+
+    @Suite
+    struct EightfoldFetcherTests {
+        private func makeSession() -> URLSession {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [FetcherURLProtocol.self]
+            return URLSession(configuration: configuration)
+        }
+
+        @Test func normalizesEndpointAndFetchesEveryPage() async throws {
+            FetcherURLProtocol.reset { request in
+                let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+                let start = Int(components?.queryItems?.first(where: { $0.name == "start" })?.value ?? "0") ?? 0
+                let count = start == 0 ? 10 : 2
+                let positions = (start..<(start + count)).map { index in
+                    [
+                        "id": index,
+                        "name": "Position \(index)",
+                        "locations": ["Remote"],
+                        "canonicalPositionUrl": "https://explore.jobs.netflix.net/careers/job/\(index)"
+                    ] as [String: Any]
+                }
+                let data = try JSONSerialization.data(withJSONObject: ["count": 12, "positions": positions])
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
                 return (response, data)
             }
 
-            let html = #"<script>cg_jobs_jobstream_url = "https://cg-jobstream-api.azurewebsites.net/api";</script>"#
-            return (response, Data(html.utf8))
+            let jobs = try await EightfoldFetcher(session: makeSession()).fetchJobs(
+                from: URL(string: "https://explore.jobs.netflix.net/api/apply/v2/jobs/123/jobs?domain=netflix.com")!
+            )
+
+            #expect(jobs.count == 12)
+            #expect(jobs.allSatisfy { $0.source == .eightfold })
+            #expect(FetcherURLProtocol.requests.count == 2)
+            #expect(FetcherURLProtocol.requests.allSatisfy { $0.path == "/api/apply/v2/jobs" })
+            #expect(FetcherURLProtocol.requests.compactMap {
+                URLComponents(url: $0, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "start" })?.value
+            } == ["0", "10"])
+        }
+    }
+
+    @Suite
+    struct CapgeminiJobStreamFetcherTests {
+        private func makeSession() -> URLSession {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [FetcherURLProtocol.self]
+            return URLSession(configuration: configuration)
         }
 
-        let fetcher = CapgeminiJobStreamFetcher(session: makeSession())
-        let careersURL = URL(string: "https://www.capgemini.com/careers/jobs?country_code=us-en")!
-        let endpoint = try await fetcher.endpoint(for: careersURL)
-        let jobs = try await fetcher.fetchJobs(from: endpoint)
+        @Test func preservesCountryFilterAndPaginatesFeed() async throws {
+            FetcherURLProtocol.reset { request in
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": request.url?.path.contains("job-search") == true ? "application/json" : "text/html"]
+                )!
 
-        #expect(endpoint.absoluteString == "https://cg-jobstream-api.azurewebsites.net/api/job-search?country_code=us-en")
-        #expect(jobs.count == 101)
-        #expect(jobs.allSatisfy { $0.source == .capgemini })
-        let pageRequests = FetcherURLProtocol.requests.filter { $0.path.contains("job-search") }
-        #expect(pageRequests.count == 2)
-        #expect(pageRequests.allSatisfy {
-            URLComponents(url: $0, resolvingAgainstBaseURL: false)?
-                .queryItems?.contains(URLQueryItem(name: "country_code", value: "us-en")) == true
-        })
+                if request.url?.path.contains("job-search") == true {
+                    let page = Int(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                        .queryItems?.first(where: { $0.name == "page" })?.value ?? "1") ?? 1
+                    let itemCount = page == 1 ? 100 : 1
+                    let start = (page - 1) * 100
+                    let listings = (start..<(start + itemCount)).map { index in
+                        [
+                            "id": "job-\(index)",
+                            "title": "Role \(index)",
+                            "location": "Seattle",
+                            "ref": "ref-\(index)",
+                            "source": "SAP"
+                        ]
+                    }
+                    let data = try JSONSerialization.data(withJSONObject: ["count": 101, "data": listings])
+                    return (response, data)
+                }
+
+                let html = #"<script>cg_jobs_jobstream_url = "https://cg-jobstream-api.azurewebsites.net/api";</script>"#
+                return (response, Data(html.utf8))
+            }
+
+            let fetcher = CapgeminiJobStreamFetcher(session: makeSession())
+            let careersURL = URL(string: "https://www.capgemini.com/careers/jobs?country_code=us-en")!
+            let endpoint = try await fetcher.endpoint(for: careersURL)
+            let jobs = try await fetcher.fetchJobs(from: endpoint)
+
+            #expect(endpoint.absoluteString == "https://cg-jobstream-api.azurewebsites.net/api/job-search?country_code=us-en")
+            #expect(jobs.count == 101)
+            #expect(jobs.allSatisfy { $0.source == .capgemini })
+            let pageRequests = FetcherURLProtocol.requests.filter { $0.path.contains("job-search") }
+            #expect(pageRequests.count == 2)
+            #expect(pageRequests.allSatisfy {
+                URLComponents(url: $0, resolvingAgainstBaseURL: false)?
+                    .queryItems?.contains(URLQueryItem(name: "country_code", value: "us-en")) == true
+            })
+        }
     }
 }
+
 
 // MARK: - Persistence Tests
 
