@@ -7,6 +7,51 @@ import Testing
 import Foundation
 @testable import FlareJobMonitor
 
+@Suite("HTML pagination policy")
+struct HTMLPaginationPolicyTests {
+    private let initialURL = URL(string: "https://careers.example.com/jobs/")!
+
+    @Test("accepts a same-origin next page and removes its fragment")
+    func acceptsSamePathPage() {
+        let candidate = URL(string: "https://careers.example.com/jobs/?page=2#results")!
+
+        let result = HTMLPaginationPolicy.nextURL(
+            candidate: candidate,
+            initialURL: initialURL,
+            currentURL: initialURL,
+            visitedURLs: [initialURL.absoluteString]
+        )
+
+        #expect(result?.absoluteString == "https://careers.example.com/jobs/?page=2")
+    }
+
+    @Test("finds rel-next anchors regardless of attribute order")
+    func extractsNextLinkFromHTML() {
+        let html = #"<a class="page-link" rel="next nofollow" href="/jobs/?team=eng&amp;page=2#results">Next page</a>"#
+
+        let result = HTMLPaginationPolicy.nextURL(
+            in: html,
+            initialURL: initialURL,
+            currentURL: initialURL,
+            visitedURLs: [initialURL.absoluteString]
+        )
+
+        #expect(result?.absoluteString == "https://careers.example.com/jobs/?team=eng&page=2")
+    }
+
+    @Test("rejects cross-origin, path-changing, and previously visited links")
+    func rejectsUnsafeLinks() {
+        let visited = Set([initialURL.absoluteString, "https://careers.example.com/jobs/?page=2"])
+        let crossOrigin = URL(string: "https://other.example.com/jobs/?page=2")!
+        let detailPage = URL(string: "https://careers.example.com/jobs/1234?page=2")!
+        let repeatedPage = URL(string: "https://careers.example.com/jobs/?page=2#results")!
+
+        #expect(HTMLPaginationPolicy.nextURL(candidate: crossOrigin, initialURL: initialURL, currentURL: initialURL, visitedURLs: visited) == nil)
+        #expect(HTMLPaginationPolicy.nextURL(candidate: detailPage, initialURL: initialURL, currentURL: initialURL, visitedURLs: visited) == nil)
+        #expect(HTMLPaginationPolicy.nextURL(candidate: repeatedPage, initialURL: initialURL, currentURL: initialURL, visitedURLs: visited) == nil)
+    }
+}
+
 // MARK: - Job Model Tests
 
 struct JobTests {
@@ -516,6 +561,33 @@ struct URLProtocolFetcherTests {
             #expect(jobs.count == 1)
             #expect(jobs.first?.title == "Senior Test Engineer")
             #expect(FetcherURLProtocol.requests.map(\.path) == ["/openings"])
+        }
+
+        @Test func followsExplicitHTMLNextPages() async throws {
+            let pageOne = """
+            <html><script type="application/ld+json">
+            {"@type":"JobPosting","title":"First Job","url":"/jobs/1"}
+            </script><a rel="next" href="/openings?page=2#results">Next page</a></html>
+            """
+            let pageTwo = """
+            <html><script type="application/ld+json">
+            {"@type":"JobPosting","title":"Second Job","url":"/jobs/2"}
+            </script></html>
+            """
+
+            FetcherURLProtocol.reset { request in
+                let html = request.url?.query == "page=2" ? pageTwo : pageOne
+                return (Self.response(for: request), Data(html.utf8))
+            }
+
+            let jobs = try await UniversalJobFetcher(session: makeSession())
+                .fetchJobs(from: URL(string: "https://careers.example.com/openings")!)
+
+            #expect(jobs.map(\.title) == ["First Job", "Second Job"])
+            #expect(FetcherURLProtocol.requests.map(\.absoluteString) == [
+                "https://careers.example.com/openings",
+                "https://careers.example.com/openings?page=2"
+            ])
         }
 
         @Test func inlineAPIRouteRunsOnlyAfterEmptyHTML() async throws {

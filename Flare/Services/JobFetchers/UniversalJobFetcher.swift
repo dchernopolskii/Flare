@@ -22,20 +22,27 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
         FetcherLog.info("Universal", "Starting extraction from: \(url.absoluteString)")
 
         let (html, extractedJobs) = try await extractFromJSON(url: url)
+        let initialJobs: [Job]
 
         if !extractedJobs.isEmpty {
             FetcherLog.info("Universal", "Found \(extractedJobs.count) jobs via JSON/API")
-            return filterJobs(extractedJobs, titleFilter: titleFilter, locationFilter: locationFilter)
-        }
-
-        let patternJobs = extractJobsFromHTMLPatterns(html: html, baseURL: url)
-        if !patternJobs.isEmpty {
+            initialJobs = extractedJobs
+        } else {
+            let patternJobs = extractJobsFromHTMLPatterns(html: html, baseURL: url)
+            guard !patternJobs.isEmpty else {
+                FetcherLog.warning("Universal", "No jobs found")
+                return []
+            }
             FetcherLog.info("Universal", "HTML patterns found \(patternJobs.count) jobs")
-            return filterJobs(patternJobs, titleFilter: titleFilter, locationFilter: locationFilter)
+            initialJobs = patternJobs
         }
 
-        FetcherLog.warning("Universal", "No jobs found")
-        return []
+        let allJobs = await expandHTMLPagination(
+            initialHTML: html,
+            initialJobs: initialJobs,
+            initialURL: url
+        )
+        return filterJobs(allJobs, titleFilter: titleFilter, locationFilter: locationFilter)
     }
 
     private func extractFromJSON(url: URL) async throws -> (html: String, jobs: [Job]) {
@@ -47,25 +54,7 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
             return (html, jobs)
         }
 
-        var allJobs: [Job] = []
-
-        let schemaJobs = extractFromSchemaOrg(html: html, baseURL: url)
-        if !schemaJobs.isEmpty {
-            FetcherLog.debug("Universal", "Schema.org found \(schemaJobs.count) jobs")
-            allJobs.append(contentsOf: schemaJobs)
-        }
-
-        let nextDataJobs = extractFromNextData(html: html, baseURL: url)
-        if !nextDataJobs.isEmpty {
-            FetcherLog.debug("Universal", "__NEXT_DATA__ found \(nextDataJobs.count) jobs")
-            allJobs = allJobs.merging(nextDataJobs)
-        }
-
-        let embeddedJobs = extractFromEmbeddedJSON(html: html, baseURL: url)
-        if !embeddedJobs.isEmpty {
-            FetcherLog.debug("Universal", "Embedded JSON found \(embeddedJobs.count) jobs")
-            allJobs = allJobs.merging(embeddedJobs)
-        }
+        var allJobs = extractDeterministicJobs(html: html, baseURL: url)
 
         // Discovery is a fallback. Once the page has yielded structured jobs,
         // probing additional routes adds latency and duplicates network work.
@@ -86,6 +75,77 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
         }
 
         return (html, allJobs)
+    }
+
+    private func extractDeterministicJobs(html: String, baseURL: URL) -> [Job] {
+        var allJobs: [Job] = []
+
+        let schemaJobs = extractFromSchemaOrg(html: html, baseURL: baseURL)
+        if !schemaJobs.isEmpty {
+            FetcherLog.debug("Universal", "Schema.org found \(schemaJobs.count) jobs")
+            allJobs.append(contentsOf: schemaJobs)
+        }
+
+        let nextDataJobs = extractFromNextData(html: html, baseURL: baseURL)
+        if !nextDataJobs.isEmpty {
+            FetcherLog.debug("Universal", "__NEXT_DATA__ found \(nextDataJobs.count) jobs")
+            allJobs = allJobs.merging(nextDataJobs)
+        }
+
+        let embeddedJobs = extractFromEmbeddedJSON(html: html, baseURL: baseURL)
+        if !embeddedJobs.isEmpty {
+            FetcherLog.debug("Universal", "Embedded JSON found \(embeddedJobs.count) jobs")
+            allJobs = allJobs.merging(embeddedJobs)
+        }
+
+        return allJobs
+    }
+
+    private func expandHTMLPagination(
+        initialHTML: String,
+        initialJobs: [Job],
+        initialURL: URL,
+        maxPages: Int = 25
+    ) async -> [Job] {
+        let normalizedInitialURL = initialURL.removingFragment
+        var currentURL = normalizedInitialURL
+        var currentHTML = initialHTML
+        var visitedURLs: Set<String> = [normalizedInitialURL.absoluteString]
+        var allJobs = initialJobs
+        var pageCount = 1
+
+        while pageCount < maxPages,
+              let nextURL = HTMLPaginationPolicy.nextURL(
+                  in: currentHTML,
+                  initialURL: normalizedInitialURL,
+                  currentURL: currentURL,
+                  visitedURLs: visitedURLs
+              ) {
+            do {
+                let nextHTML = try await fetchHTML(from: nextURL)
+                var pageJobs = extractDeterministicJobs(html: nextHTML, baseURL: nextURL)
+                if pageJobs.isEmpty {
+                    pageJobs = extractJobsFromHTMLPatterns(html: nextHTML, baseURL: nextURL)
+                }
+
+                guard !pageJobs.isEmpty else {
+                    FetcherLog.warning("Universal", "Pagination page \(pageCount + 1) contained no jobs")
+                    break
+                }
+
+                allJobs = allJobs.merging(pageJobs)
+                pageCount += 1
+                currentURL = nextURL
+                currentHTML = nextHTML
+                visitedURLs.insert(nextURL.absoluteString)
+                FetcherLog.debug("Universal", "HTML pagination page \(pageCount): \(allJobs.count) unique jobs")
+            } catch {
+                FetcherLog.warning("Universal", "HTML pagination stopped after \(pageCount) page(s): \(error.localizedDescription)")
+                break
+            }
+        }
+
+        return allJobs
     }
 
     private func discoverAPIFromHTML(html: String, baseURL: URL) async -> [Job] {
