@@ -16,23 +16,131 @@ struct DetectedAPICall {
     let response: String?
 }
 
+struct HTMLPaginationPolicy {
+    static func nextURL(
+        in html: String,
+        initialURL: URL,
+        currentURL: URL,
+        visitedURLs: Set<String>
+    ) -> URL? {
+        guard let anchorRegex = try? NSRegularExpression(pattern: #"<a\b[^>]*>"#, options: .caseInsensitive),
+              let relRegex = try? NSRegularExpression(pattern: #"\brel\s*=\s*[\"']([^\"']*)[\"']"#, options: .caseInsensitive),
+              let hrefRegex = try? NSRegularExpression(pattern: #"\bhref\s*=\s*[\"']([^\"']+)[\"']"#, options: .caseInsensitive) else {
+            return nil
+        }
+
+        let anchors = anchorRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        for anchor in anchors {
+            guard let anchorRange = Range(anchor.range, in: html) else { continue }
+            let tag = String(html[anchorRange])
+            let tagRange = NSRange(tag.startIndex..., in: tag)
+
+            guard let relMatch = relRegex.firstMatch(in: tag, range: tagRange),
+                  let relRange = Range(relMatch.range(at: 1), in: tag),
+                  tag[relRange].split(whereSeparator: { $0.isWhitespace }).contains(where: { $0.lowercased() == "next" }),
+                  let hrefMatch = hrefRegex.firstMatch(in: tag, range: tagRange),
+                  let hrefRange = Range(hrefMatch.range(at: 1), in: tag) else {
+                continue
+            }
+
+            let href = String(tag[hrefRange]).replacingOccurrences(of: "&amp;", with: "&")
+            guard let candidate = URL(string: href, relativeTo: currentURL)?.absoluteURL else { continue }
+            return nextURL(
+                candidate: candidate,
+                initialURL: initialURL,
+                currentURL: currentURL,
+                visitedURLs: visitedURLs
+            )
+        }
+
+        return nil
+    }
+
+    static func nextURL(
+        candidate: URL,
+        initialURL: URL,
+        currentURL: URL,
+        visitedURLs: Set<String>
+    ) -> URL? {
+        guard let initial = normalizedComponents(for: initialURL),
+              let current = normalizedComponents(for: currentURL),
+              var next = URLComponents(url: candidate, resolvingAgainstBaseURL: false),
+              let nextScheme = next.scheme?.lowercased(),
+              let nextHost = next.host?.lowercased(),
+              nextScheme == initial.scheme,
+              nextHost == initial.host,
+              next.port == initial.port,
+              normalizedPath(next.path) == initial.path,
+              normalizedPath(next.path) == current.path else {
+            return nil
+        }
+
+        next.fragment = nil
+        guard let normalizedURL = next.url,
+              normalizedURL.absoluteString != currentURL.removingFragment.absoluteString,
+              !visitedURLs.contains(normalizedURL.absoluteString) else {
+            return nil
+        }
+
+        return normalizedURL
+    }
+
+    private static func normalizedComponents(for url: URL) -> (scheme: String, host: String, port: Int?, path: String)? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased() else {
+            return nil
+        }
+
+        return (scheme, host, components.port, normalizedPath(components.path))
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        guard path.count > 1 else { return path }
+        return path.hasSuffix("/") ? String(path.dropLast()) : path
+    }
+}
+
+extension URL {
+    var removingFragment: URL {
+        var components = URLComponents(url: self, resolvingAgainstBaseURL: false)
+        components?.fragment = nil
+        return components?.url ?? self
+    }
+}
+
 @MainActor
 class WebKitRenderer: NSObject, WKNavigationDelegate {
     private static let maxCapturedCalls = 12
     private static let maxRequestBodyCharacters = 16_384
     private static let maxResponseCharacters = 131_072
     private static let maxTotalCapturedCharacters = 524_288
+    private static let maxPaginatedHTMLCharacters = 8_000_000
+    private static let defaultMaxHTMLPages = 25
 
     private var webView: WKWebView?
     private var renderContinuation: CheckedContinuation<RenderResult, Error>?
     private var loadTimeout: Task<Void, Never>?
+    private var initialURL: URL?
+    private var currentURL: URL?
+    private var waitTime: TimeInterval = 5.0
+    private var maxHTMLPages = defaultMaxHTMLPages
+    private var visitedURLs = Set<String>()
+    private var collectedHTMLPages: [String] = []
+    private var collectedAPICalls: [DetectedAPICall] = []
+    private var collectedHTMLCharacters = 0
+    private var isExtracting = false
 
     struct RenderResult {
         let html: String
         let detectedAPICalls: [DetectedAPICall]
     }
 
-    func renderWithAPIDetection(from url: URL, waitTime: TimeInterval = 5.0) async throws -> RenderResult {
+    func renderWithAPIDetection(
+        from url: URL,
+        waitTime: TimeInterval = 5.0,
+        maxHTMLPages: Int = 25
+    ) async throws -> RenderResult {
         try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 // A renderer is single-use while a navigation is active. Finishing the
@@ -40,6 +148,15 @@ class WebKitRenderer: NSObject, WKNavigationDelegate {
                 // leaving its caller suspended forever.
                 finish(throwing: CancellationError())
                 renderContinuation = continuation
+                self.initialURL = url.removingFragment
+                self.currentURL = url.removingFragment
+                self.waitTime = waitTime
+                self.maxHTMLPages = max(1, maxHTMLPages)
+                self.visitedURLs = [url.removingFragment.absoluteString]
+                self.collectedHTMLPages = []
+                self.collectedAPICalls = []
+                self.collectedHTMLCharacters = 0
+                self.isExtracting = false
 
                 guard !Task.isCancelled else {
                     finish(throwing: CancellationError())
@@ -205,18 +322,7 @@ class WebKitRenderer: NSObject, WKNavigationDelegate {
 
                 let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
                 webView?.load(request)
-
-                loadTimeout = Task { [weak self] in
-                    do {
-                        try await Task.sleep(nanoseconds: UInt64(waitTime * 1_000_000_000))
-                    } catch {
-                        return
-                    }
-
-                    guard let self, self.renderContinuation != nil else { return }
-                    print("[WebKitRenderer] Timeout reached, extracting data...")
-                    await self.extractRenderResult()
-                }
+                scheduleExtractionTimeout(after: waitTime)
             }
         }, onCancel: { [weak self] in
             Task { @MainActor [weak self] in
@@ -236,7 +342,11 @@ class WebKitRenderer: NSObject, WKNavigationDelegate {
         Task { @MainActor in
             print("[WebKitRenderer] Page loaded, waiting for JavaScript execution...")
 
-            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+            self.loadTimeout?.cancel()
+            self.loadTimeout = nil
+
+            let delay: TimeInterval = self.collectedHTMLPages.isEmpty ? 2.0 : 0.35
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
 
             print("[WebKitRenderer] Extracting data...")
             guard !Task.isCancelled, self.renderContinuation != nil else { return }
@@ -247,25 +357,47 @@ class WebKitRenderer: NSObject, WKNavigationDelegate {
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             print("[WebKitRenderer] Navigation failed: \(error.localizedDescription)")
-            finish(throwing: error)
+            finishAfterNavigationFailure(error)
         }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in
             print("[WebKitRenderer] Provisional navigation failed: \(error.localizedDescription)")
-            finish(throwing: error)
+            finishAfterNavigationFailure(error)
         }
     }
 
     // MARK: - Private
 
+    private func scheduleExtractionTimeout(after delay: TimeInterval) {
+        loadTimeout?.cancel()
+        loadTimeout = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                return
+            }
+
+            guard let self, self.renderContinuation != nil else { return }
+            print("[WebKitRenderer] Timeout reached, extracting data...")
+            await self.extractRenderResult()
+        }
+    }
+
     private func extractRenderResult() async {
-        guard let webView = webView, let continuation = renderContinuation else { return }
+        guard let webView = webView,
+              renderContinuation != nil,
+              !isExtracting else { return }
+
+        isExtracting = true
 
         do {
             let html = try await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String ?? ""
             let apiCallsJSON = try await webView.evaluateJavaScript("JSON.stringify(window.__apiCalls || [])") as? String ?? "[]"
+            let nextURLString = try await webView.evaluateJavaScript(
+                "document.querySelector('a[rel~=\"next\"]')?.href || null"
+            ) as? String
 
             print("[WebKitRenderer] Extracted \(html.count) characters of rendered HTML")
             print("[WebKitRenderer] API calls JSON: \(apiCallsJSON.prefix(500))")
@@ -356,8 +488,35 @@ class WebKitRenderer: NSObject, WKNavigationDelegate {
 
             print("[WebKitRenderer] Detected \(detectedCalls.count) API calls")
 
-            let result = RenderResult(html: html, detectedAPICalls: detectedCalls)
-            finish(returning: result)
+            collectedHTMLPages.append(html)
+            collectedHTMLCharacters += html.count
+            let remainingCallSlots = max(0, Self.maxCapturedCalls - collectedAPICalls.count)
+            collectedAPICalls.append(contentsOf: detectedCalls.prefix(remainingCallSlots))
+
+            if collectedHTMLPages.count < maxHTMLPages,
+               collectedHTMLCharacters < Self.maxPaginatedHTMLCharacters,
+               let initialURL,
+               let currentURL,
+               let nextURLString,
+               let candidate = URL(string: nextURLString, relativeTo: currentURL)?.absoluteURL,
+               let nextURL = HTMLPaginationPolicy.nextURL(
+                   candidate: candidate,
+                   initialURL: initialURL,
+                   currentURL: currentURL,
+                   visitedURLs: visitedURLs
+               ) {
+                print("[WebKitRenderer] Following HTML pagination to page \(collectedHTMLPages.count + 1): \(nextURL.absoluteString)")
+                self.currentURL = nextURL
+                visitedURLs.insert(nextURL.absoluteString)
+                isExtracting = false
+                scheduleExtractionTimeout(after: waitTime)
+                webView.load(URLRequest(url: nextURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+                return
+            }
+
+            let combinedHTML = collectedHTMLPages.joined(separator: "\n<!-- FLARE_PAGE_BREAK -->\n")
+            print("[WebKitRenderer] Completed \(collectedHTMLPages.count) HTML page(s), \(combinedHTML.count) total characters")
+            finish(returning: RenderResult(html: combinedHTML, detectedAPICalls: collectedAPICalls))
 
         } catch {
             print("[WebKitRenderer] Failed to extract data: \(error.localizedDescription)")
@@ -370,6 +529,19 @@ class WebKitRenderer: NSObject, WKNavigationDelegate {
         renderContinuation = nil
         tearDownWebView()
         continuation.resume(returning: result)
+    }
+
+    private func finishAfterNavigationFailure(_ error: Error) {
+        guard !collectedHTMLPages.isEmpty else {
+            finish(throwing: error)
+            return
+        }
+
+        print("[WebKitRenderer] Returning \(collectedHTMLPages.count) page(s) collected before pagination failed")
+        finish(returning: RenderResult(
+            html: collectedHTMLPages.joined(separator: "\n<!-- FLARE_PAGE_BREAK -->\n"),
+            detectedAPICalls: collectedAPICalls
+        ))
     }
 
     private func finish(throwing error: Error) {
@@ -389,5 +561,12 @@ class WebKitRenderer: NSObject, WKNavigationDelegate {
         webView?.navigationDelegate = nil
         webView?.configuration.userContentController.removeAllUserScripts()
         webView = nil
+        initialURL = nil
+        currentURL = nil
+        visitedURLs = []
+        collectedHTMLPages = []
+        collectedAPICalls = []
+        collectedHTMLCharacters = 0
+        isExtracting = false
     }
 }
