@@ -24,4 +24,4 @@ Flare requests notification permission to alert you about new jobs. Import and e
 
 ## Contact
 
-Questions and privacy requests can be submitted through the [Flare support page](https://github.com/dchernopolskii/Flare/issues).
+Questions and privacy requests can be submitted through the [Flare support page](https://have-fun.engineering/Flare) or through [Github Issues](https://github.com/dchernopolskii/Flare/issues)
