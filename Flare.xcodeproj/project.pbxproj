@@ -796,8 +796,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/dchernopolskii/SwiftLlama/";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = revision;
+				revision = 30c40b23f18a3ae3855b6fd47f9b3f13a66d07da;
 			};
 		};
 		379313BF2EC489F3002FF2AB /* XCRemoteSwiftPackageReference "Sparkle" */ = {

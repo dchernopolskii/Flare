@@ -1,5 +1,5 @@
 {
-  "originHash" : "144cac76a90d0849ea0da936ed11b05cffa9c59b6b6dacfee9cb1b016d9ac2ef",
+  "originHash" : "ba7d931b6ff579fe1f6b4d4b3a61f8abb662847a0180e9d8e721103021eb4e37",
   "pins" : [
     {
       "identity" : "sparkle",
@@ -15,8 +15,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/dchernopolskii/SwiftLlama/",
       "state" : {
-        "branch" : "main",
-        "revision" : "47307c02bdb2131006de37ddd0a5b428bc31ed47"
+        "revision" : "30c40b23f18a3ae3855b6fd47f9b3f13a66d07da"
       }
     }
   ],

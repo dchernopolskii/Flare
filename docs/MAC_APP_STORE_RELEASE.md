@@ -7,7 +7,7 @@ Flare has two distribution targets in the same Xcode project:
 
 The Store target defines `APP_STORE`, uses `Flare/Info-AppStore.plist` and `Flare/Flare-AppStore.entitlements`, and currently uses the bundle identifier `com.hcf0xf9d.FlareAppStore`.
 
-The Store build is Apple Silicon-only. The current SwiftLlama package does not produce a valid x86_64 Release binary, and Flare's optional local-model workflow is intended for Apple Silicon Macs.
+The Store build supports both Apple Silicon and Intel Macs. SwiftLlama uses optimized ARM kernels on Apple Silicon and generic CPU implementations on Intel.
 
 ## One-time App Store Connect setup
 
@@ -31,7 +31,7 @@ Include these points with the first submission:
 
 ## Archive and validation
 
-1. Select the `FlareAppStore` scheme and `My Mac` on an Apple Silicon Mac. The generic Mac destination currently asks SwiftLlama for an unsupported Intel slice.
+1. Select the `FlareAppStore` scheme and the generic `Any Mac` destination so the archive contains both `arm64` and `x86_64` slices.
 2. Set a monotonically increasing integer build number in `CURRENT_PROJECT_VERSION`. Keep `MARKETING_VERSION` aligned with the public release.
 3. Choose Product > Archive.
 4. In Organizer, run Validate App before uploading to App Store Connect.
