@@ -5,14 +5,14 @@ Flare has two distribution targets in the same Xcode project:
 - `FlareJobMonitor` builds the direct GitHub/Homebrew edition with Sparkle.
 - `FlareAppStore` builds the Mac App Store edition without Sparkle.
 
-The Store target defines `APP_STORE`, uses `Flare/Info-AppStore.plist` and `Flare/Flare-AppStore.entitlements`, and currently uses the bundle identifier `com.hcf0xf9d.FlareAppStore`.
+The Store target defines `APP_STORE`, uses `Flare/Info-AppStore.plist` and `Flare/Flare-AppStore.entitlements`, and uses the existing `com.hcf0xf9d.Flare` bundle identifier.
 
 The Store build supports both Apple Silicon and Intel Macs. SwiftLlama uses optimized ARM kernels on Apple Silicon and generic CPU implementations on Intel.
 
 ## One-time App Store Connect setup
 
-1. Register `com.hcf0xf9d.FlareAppStore` as an explicit App ID in the Apple Developer portal.
-2. Create the macOS app in App Store Connect and select that bundle ID.
+1. Confirm the existing `com.hcf0xf9d.Flare` explicit App ID is selected by the Flare record in App Store Connect.
+2. Open the existing Flare app record in App Store Connect and confirm it uses that bundle ID.
 3. Confirm the app name `Flare` is available and set the primary category to Utilities.
 4. Use `https://github.com/dchernopolskii/Flare` as the support URL.
 5. Publish `PRIVACY.md` on the default branch and use its GitHub page as the privacy policy URL.
