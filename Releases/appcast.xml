@@ -3,13 +3,13 @@
     <channel>
         <title>FlareJobMonitor</title>
         <item>
-            <title>Flare 1.13</title>
-            <pubDate>Wed, 12 Aug 2026 15:22:47 -0700</pubDate>
-            <sparkle:version>1.13</sparkle:version>
-            <sparkle:shortVersionString>1.13</sparkle:shortVersionString>
+            <title>Flare 1.14</title>
+            <pubDate>Tue, 18 Aug 2026 15:16:00 -0700</pubDate>
+            <sparkle:version>1.14</sparkle:version>
+            <sparkle:shortVersionString>1.14</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.4</sparkle:minimumSystemVersion>
-            <sparkle:releaseNotesLink>https://github.com/dchernopolskii/Flare/releases/tag/v1.13</sparkle:releaseNotesLink>
-            <enclosure url="https://github.com/dchernopolskii/Flare/releases/download/v1.13/FlareJobMonitor.zip" length="8804488" type="application/zip" sparkle:edSignature="ULy9GCAIJZ42IkVAApV1WPsdJUZB8iN0T5c74NA5F1ak0LXml1GTVhjt/zSep6tgkSI7k8jI7ooE681cImtrBA=="/>
+            <sparkle:releaseNotesLink>https://github.com/dchernopolskii/Flare/releases/tag/v1.14</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/dchernopolskii/Flare/releases/download/v1.14/FlareJobMonitor.zip" length="8806841" type="application/zip" sparkle:edSignature="Xn4aiwuIj85xNVtoeX0x9ojGfIqeWD06BWR+5NM6ECXeYR68a7U2nyiIZiEbPtCfhVTcvLIjJAr9EzL7r3DdAQ=="/>
         </item>
     </channel>
 </rss>
