@@ -46,7 +46,7 @@ actor EightfoldFetcher: URLBasedJobFetcherProtocol {
             let location = position.locations?.filter { !$0.isEmpty }.joined(separator: " / ")
                 ?? position.location
                 ?? "Not specified"
-            let jobURL = position.canonicalPositionURL ?? careerURL(for: position.id, endpoint: endpoint)
+            let jobURL = resolvedCareerURL(position.canonicalPositionURL, positionID: position.id, endpoint: endpoint)
 
             return Job(
                 id: jobID,
@@ -91,8 +91,13 @@ actor EightfoldFetcher: URLBasedJobFetcherProtocol {
         }
 
         var components = URLComponents(url: httpResponse.url ?? url, resolvingAgainstBaseURL: false)
-        components?.path = "/api/apply/v2/jobs"
-        components?.queryItems = [URLQueryItem(name: "domain", value: domain)]
+        if Self.isPCSXPage(html) {
+            components?.path = "/api/pcsx/search"
+            components?.queryItems = Self.preservedSearchQueryItems(from: url, domain: domain)
+        } else {
+            components?.path = "/api/apply/v2/jobs"
+            components?.queryItems = [URLQueryItem(name: "domain", value: domain)]
+        }
         guard let endpoint = components?.url else { throw FetchError.invalidURL }
         return endpoint
     }
@@ -100,7 +105,8 @@ actor EightfoldFetcher: URLBasedJobFetcherProtocol {
     private func normalizedEndpoint(from url: URL) -> URL? {
         let isBoardEndpoint = url.path == "/api/apply/v2/jobs"
         let isJobScopedEndpoint = url.path.hasPrefix("/api/apply/v2/jobs/") && url.path.hasSuffix("/jobs")
-        guard isBoardEndpoint || isJobScopedEndpoint,
+        let isPCSXEndpoint = url.path == "/api/pcsx/search"
+        guard isBoardEndpoint || isJobScopedEndpoint || isPCSXEndpoint,
               let domain = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?
                 .first(where: { $0.name == "domain" })?
@@ -110,19 +116,29 @@ actor EightfoldFetcher: URLBasedJobFetcherProtocol {
         }
 
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.path = "/api/apply/v2/jobs"
-        components?.queryItems = [URLQueryItem(name: "domain", value: domain)]
+        if isPCSXEndpoint {
+            components?.queryItems = Self.preservedSearchQueryItems(from: url, domain: domain)
+        } else {
+            components?.path = "/api/apply/v2/jobs"
+            components?.queryItems = [URLQueryItem(name: "domain", value: domain)]
+        }
         return components?.url
     }
 
     private func fetchPage(endpoint: URL, start: Int) async throws -> EightfoldResponse {
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
-        let domain = components?.queryItems?.first(where: { $0.name == "domain" })?.value
-        components?.queryItems = [
-            URLQueryItem(name: "domain", value: domain),
-            URLQueryItem(name: "start", value: String(start)),
-            URLQueryItem(name: "num", value: String(pageSize))
-        ]
+        if endpoint.path == "/api/pcsx/search" {
+            var queryItems = components?.queryItems?.filter { $0.name != "start" } ?? []
+            queryItems.append(URLQueryItem(name: "start", value: String(start)))
+            components?.queryItems = queryItems
+        } else {
+            let domain = components?.queryItems?.first(where: { $0.name == "domain" })?.value
+            components?.queryItems = [
+                URLQueryItem(name: "domain", value: domain),
+                URLQueryItem(name: "start", value: String(start)),
+                URLQueryItem(name: "num", value: String(pageSize))
+            ]
+        }
         guard let pageURL = components?.url else { throw FetchError.invalidURL }
 
         var request = URLRequest(url: pageURL)
@@ -139,9 +155,6 @@ actor EightfoldFetcher: URLBasedJobFetcherProtocol {
     }
 
     private static func extractDomain(from html: String) -> String? {
-        guard html.range(of: "smartApplyData", options: .caseInsensitive) != nil else {
-            return nil
-        }
         let decoded = html
             .replacingOccurrences(of: "&#34;", with: "\"")
             .replacingOccurrences(of: "&quot;", with: "\"")
@@ -154,17 +167,63 @@ actor EightfoldFetcher: URLBasedJobFetcherProtocol {
         return String(decoded[range])
     }
 
+    private static func isPCSXPage(_ html: String) -> Bool {
+        html.range(of: "id=\"pcsx-data\"", options: .caseInsensitive) != nil
+            || html.range(of: "id='pcsx-data'", options: .caseInsensitive) != nil
+            || html.range(of: "_EF_PRODUCT = \"PCS\"", options: .caseInsensitive) != nil
+    }
+
+    private static func preservedSearchQueryItems(from url: URL, domain: String) -> [URLQueryItem] {
+        let allowedNames = Set(["query", "location", "sort_by", "hl"])
+        let sourceItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        var items = [URLQueryItem(name: "domain", value: domain)]
+        var hasQuery = false
+
+        for item in sourceItems where allowedNames.contains(item.name) || item.name.hasPrefix("filter_") {
+            hasQuery = hasQuery || item.name == "query"
+            items.append(item)
+        }
+
+        if !hasQuery {
+            items.insert(URLQueryItem(name: "query", value: ""), at: 1)
+        }
+        return items
+    }
+
     private func careerURL(for positionID: String, endpoint: URL) -> String {
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         components?.path = "/careers/job/\(positionID)"
         components?.query = nil
         return components?.url?.absoluteString ?? endpoint.absoluteString
     }
+
+    private func resolvedCareerURL(_ value: String?, positionID: String, endpoint: URL) -> String {
+        guard let value, !value.isEmpty else {
+            return careerURL(for: positionID, endpoint: endpoint)
+        }
+        return URL(string: value, relativeTo: endpoint)?.absoluteURL.absoluteString ?? value
+    }
 }
 
 private struct EightfoldResponse: Decodable {
     let count: Int
     let positions: [EightfoldPosition]
+
+    private enum CodingKeys: String, CodingKey {
+        case count, positions, data
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.data) {
+            let data = try container.nestedContainer(keyedBy: CodingKeys.self, forKey: .data)
+            count = try data.decode(Int.self, forKey: .count)
+            positions = try data.decode([EightfoldPosition].self, forKey: .positions)
+        } else {
+            count = try container.decode(Int.self, forKey: .count)
+            positions = try container.decode([EightfoldPosition].self, forKey: .positions)
+        }
+    }
 }
 
 private struct EightfoldPosition: Decodable {
@@ -184,8 +243,11 @@ private struct EightfoldPosition: Decodable {
         case postingName = "posting_name"
         case businessUnit = "business_unit"
         case updatedAt = "t_update"
+        case postedAt = "postedTs"
         case canonicalPositionURL = "canonicalPositionUrl"
+        case positionURL = "positionUrl"
         case workLocationOption = "work_location_option"
+        case workLocationOptionPCSX = "workLocationOption"
     }
 
     init(from decoder: Decoder) throws {
@@ -198,8 +260,11 @@ private struct EightfoldPosition: Decodable {
         department = try container.decodeIfPresent(String.self, forKey: .department)
         businessUnit = try container.decodeIfPresent(String.self, forKey: .businessUnit)
         updatedAt = try container.decodeIfPresent(TimeInterval.self, forKey: .updatedAt)
+            ?? container.decodeIfPresent(TimeInterval.self, forKey: .postedAt)
         canonicalPositionURL = try container.decodeIfPresent(String.self, forKey: .canonicalPositionURL)
+            ?? container.decodeIfPresent(String.self, forKey: .positionURL)
         workLocationOption = try container.decodeIfPresent(String.self, forKey: .workLocationOption)
+            ?? container.decodeIfPresent(String.self, forKey: .workLocationOptionPCSX)
     }
 
     private static func decodeString(forKey key: CodingKeys, from container: KeyedDecodingContainer<CodingKeys>) throws -> String {

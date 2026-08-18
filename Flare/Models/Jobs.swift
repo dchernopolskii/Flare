@@ -363,7 +363,9 @@ enum JobSource: String, Codable, CaseIterable, Equatable {
             return .capgemini
         } else if lowercased.contains("myworkdayjobs.com") || lowercased.contains(".wd") {
             return .workday
-        } else if lowercased.contains("/api/apply/v2/jobs") || lowercased.contains("smartapply") {
+        } else if lowercased.contains("/api/apply/v2/jobs")
+                    || lowercased.contains("/api/pcsx/search")
+                    || lowercased.contains("smartapply") {
             return .eightfold
         } else if lowercased.contains("greenhouse.io") {
             return .greenhouse
