@@ -220,6 +220,7 @@ struct JobSourceTests {
     @Test func detectCapgeminiAndEightfoldFromURLs() async throws {
         #expect(JobSource.detectFromURL("https://www.capgemini.com/careers") == .capgemini)
         #expect(JobSource.detectFromURL("https://explore.jobs.netflix.net/api/apply/v2/jobs?domain=netflix.com") == .eightfold)
+        #expect(JobSource.detectFromURL("https://careers.deere.com/api/pcsx/search?domain=johndeere.com") == .eightfold)
     }
 
     @Test func unknownSourceForCustomURL() async throws {
@@ -709,6 +710,62 @@ struct URLProtocolFetcherTests {
                 URLComponents(url: $0, resolvingAgainstBaseURL: false)?
                     .queryItems?.first(where: { $0.name == "start" })?.value
             } == ["0", "10"])
+        }
+
+        @Test func discoversPCSXEndpointAndPreservesSearchFiltersAcrossPages() async throws {
+            FetcherURLProtocol.reset { request in
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": request.url?.path == "/careers" ? "text/html" : "application/json"]
+                )!
+
+                if request.url?.path == "/careers" {
+                    let html = #"<code id="pcsx-data">{&#34;domain&#34;: &#34;johndeere.com&#34;}</code>"#
+                    return (response, Data(html.utf8))
+                }
+
+                let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+                let start = Int(components?.queryItems?.first(where: { $0.name == "start" })?.value ?? "0") ?? 0
+                let count = start < 20 ? 10 : 1
+                let positions = (start..<(start + count)).map { index in
+                    [
+                        "id": index,
+                        "name": "Position \(index)",
+                        "locations": ["United States"],
+                        "postedTs": 1_700_000_000,
+                        "positionUrl": "/careers/job/\(index)",
+                        "workLocationOption": "remote"
+                    ] as [String: Any]
+                }
+                let data = try JSONSerialization.data(withJSONObject: [
+                    "data": ["count": 21, "positions": positions]
+                ])
+                return (response, data)
+            }
+
+            let jobs = try await EightfoldFetcher(session: makeSession()).fetchJobs(
+                from: URL(string: "https://careers.deere.com/careers?start=0&location=united+states&pid=123&sort_by=distance&filter_include_remote=1&filter_include_relocation=0")!
+            )
+
+            #expect(jobs.count == 21)
+            #expect(jobs.first?.url == "https://careers.deere.com/careers/job/0")
+            #expect(jobs.first?.workSiteFlexibility == "Remote")
+
+            let apiRequests = FetcherURLProtocol.requests.filter { $0.path == "/api/pcsx/search" }
+            #expect(apiRequests.count == 3)
+            #expect(apiRequests.compactMap {
+                URLComponents(url: $0, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "start" })?.value
+            } == ["0", "10", "20"])
+            #expect(apiRequests.allSatisfy { request in
+                let items = URLComponents(url: request, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                return items.contains(URLQueryItem(name: "domain", value: "johndeere.com"))
+                    && items.contains(URLQueryItem(name: "location", value: "united states"))
+                    && items.contains(URLQueryItem(name: "sort_by", value: "distance"))
+                    && items.contains(URLQueryItem(name: "filter_include_remote", value: "1"))
+                    && items.contains(URLQueryItem(name: "filter_include_relocation", value: "0"))
+                    && !items.contains(where: { $0.name == "pid" })
+            })
         }
     }
 

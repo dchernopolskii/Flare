@@ -48,7 +48,10 @@ actor UniversalJobFetcher: URLBasedJobFetcherProtocol {
     private func extractFromJSON(url: URL) async throws -> (html: String, jobs: [Job]) {
         let html = try await fetchHTML(from: url)
 
-        if html.range(of: "smartApplyData", options: .caseInsensitive) != nil,
+        let isEightfoldPage = html.range(of: "smartApplyData", options: .caseInsensitive) != nil
+            || html.range(of: "pcsx-data", options: .caseInsensitive) != nil
+            || html.range(of: "_EF_PRODUCT", options: .caseInsensitive) != nil
+        if isEightfoldPage,
            let jobs = try? await eightfoldFetcher.fetchJobs(from: url),
            !jobs.isEmpty {
             return (html, jobs)
