@@ -10,23 +10,34 @@ import Foundation
 actor ModelDownloader {
     static let shared = ModelDownloader()
 
-    private let modelURL = "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+    private let modelURL: URL
+    private let modelDirectory: URL
     private let modelFileName = "llama32-3b-instruct-q4_k_m.gguf"
 
     private var isDownloading = false
     private var downloadTask: URLSessionDownloadTask?
 
-    private init() {}
+    init(
+        modelDirectory: URL? = nil,
+        modelURL: URL = URL(string: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf")!
+    ) {
+        self.modelDirectory = modelDirectory ?? FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Flare", isDirectory: true)
+        self.modelURL = modelURL
+    }
 
     func getModelPath() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let flareDir = appSupport.appendingPathComponent("Flare")
-        try? FileManager.default.createDirectory(at: flareDir, withIntermediateDirectories: true)
-        let modelPath = flareDir.appendingPathComponent(modelFileName)
+        let modelPath = modelDirectory.appendingPathComponent(modelFileName)
 
         if !FileManager.default.fileExists(atPath: modelPath.path),
            let oldPath = legacyModelPaths().first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
-            try? FileManager.default.moveItem(at: oldPath, to: modelPath)
+            do {
+                try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: oldPath, to: modelPath)
+            } catch {
+                print("[ModelDownloader] Could not migrate legacy model: \(error)")
+            }
         }
 
         return modelPath
@@ -79,10 +90,6 @@ actor ModelDownloader {
             progressHandler(0.0, "Starting download...")
         }
 
-        guard let url = URL(string: modelURL) else {
-            throw ModelDownloadError.invalidURL
-        }
-
         let delegate = DownloadDelegate { progress, status in
             Task { @MainActor in
                 progressHandler(progress, status)
@@ -94,12 +101,21 @@ actor ModelDownloader {
         configuration.timeoutIntervalForResource = 7200 // 2 hours
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
 
-        do {
-            let (downloadedURL, response) = try await session.download(from: url)
+        defer { session.invalidateAndCancel() }
 
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                throw ModelDownloadError.downloadFailed
+        do {
+            // A fresh sandbox may not have either directory yet. Do not hide
+            // filesystem failures or wait until a multi-GB transfer finishes.
+            try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: FileManager.default.temporaryDirectory, withIntermediateDirectories: true)
+            let (downloadedURL, response) = try await session.download(from: modelURL)
+            defer { try? FileManager.default.removeItem(at: downloadedURL) }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ModelDownloadError.invalidResponse
+            }
+            guard httpResponse.statusCode == 200 else {
+                throw ModelDownloadError.httpStatus(httpResponse.statusCode)
             }
 
             if FileManager.default.fileExists(atPath: modelPath.path) {
@@ -119,7 +135,7 @@ actor ModelDownloader {
             await MainActor.run {
                 progressHandler(0.0, "Download failed")
             }
-            throw ModelDownloadError.downloadFailed
+            throw error
         }
     }
 
@@ -149,6 +165,23 @@ actor ModelDownloader {
     }
 }
 
+struct ModelDownloadProgress {
+    let fraction: Double
+    let status: String
+
+    init(totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        let downloadedMB = Double(max(0, totalBytesWritten)) / 1_000_000
+        if totalBytesExpectedToWrite > 0 {
+            fraction = min(1, max(0, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)))
+            status = String(format: "Downloading: %.0f / %.0f MB", downloadedMB, Double(totalBytesExpectedToWrite) / 1_000_000)
+        } else {
+            // URLSession uses -1 when the server does not supply a length.
+            fraction = 0
+            status = String(format: "Downloading: %.0f MB (total size unknown)", downloadedMB)
+        }
+    }
+}
+
 // MARK: - Download Delegate
 
 private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
@@ -159,12 +192,8 @@ private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        let progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-        let downloadedMB = Double(totalBytesWritten) / 1_000_000
-        let totalMB = Double(totalBytesExpectedToWrite) / 1_000_000
-        let status = String(format: "Downloading: %.0f / %.0f MB", downloadedMB, totalMB)
-
-        progressHandler(progress, status)
+        let update = ModelDownloadProgress(totalBytesWritten: totalBytesWritten, totalBytesExpectedToWrite: totalBytesExpectedToWrite)
+        progressHandler(update.fraction, update.status)
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
@@ -173,16 +202,16 @@ private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
 }
 
 enum ModelDownloadError: Error, LocalizedError {
-    case invalidURL
-    case downloadFailed
+    case invalidResponse
+    case httpStatus(Int)
     case alreadyDownloading
 
     var errorDescription: String? {
         switch self {
-        case .invalidURL:
-            return "Invalid model download URL"
-        case .downloadFailed:
-            return "Failed to download LLM model. Please check your internet connection."
+        case .invalidResponse:
+            return "The model server returned an invalid response. Please try again."
+        case .httpStatus(let status):
+            return "The model server returned HTTP \(status). Please try again."
         case .alreadyDownloading:
             return "Model is already being downloaded"
         }
