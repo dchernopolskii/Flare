@@ -8,6 +8,12 @@ import WebKit
 
 actor ATSDetectorService {
     static let shared = ATSDetectorService()
+
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
     
     struct DetectionResult {
         struct Evidence: Codable, Hashable {
@@ -61,7 +67,7 @@ actor ATSDetectorService {
     func detectATS(from url: URL) async throws -> DetectionResult {
         print("[ATS Detector] Starting detection for: \(url.absoluteString)")
         
-        if let quickMatch = JobSource.detectFromURL(url.absoluteString) {
+        if let quickMatch = JobSource.detectFromURL(url.absoluteString), quickMatch != .unknown {
             print("[ATS Detector] Quick match found: \(quickMatch.rawValue)")
             return DetectionResult(
                 source: quickMatch,
@@ -78,7 +84,7 @@ actor ATSDetectorService {
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await session.data(for: request)
         guard let html = String(data: data, encoding: .utf8) else {
             print("[ATS Detector] Failed to decode HTML")
             throw FetchError.invalidResponse
@@ -271,22 +277,22 @@ actor ATSDetectorService {
             }
         }
         
-        if isCareersPage && indicators.isEmpty {
-            print("[Probe] No indicators found, but looks like careers page. Trying fallback probes...")
+        if isCareersPage {
+            print("[Probe] No indicated ATS validated. Trying remaining careers-page probes...")
             
-            if let result = await probeGreenhouse(companySlug: companySlug) {
+            if indicators.greenhouse == 0, let result = await probeGreenhouse(companySlug: companySlug) {
                 return result
             }
             
-            if let result = await probeLever(companySlug: companySlug) {
+            if indicators.lever == 0, let result = await probeLever(companySlug: companySlug) {
                 return result
             }
             
-            if let result = await probeAshby(companySlug: companySlug) {
+            if indicators.ashby == 0, let result = await probeAshby(companySlug: companySlug) {
                 return result
             }
             
-            if let result = await probeWorkdayVariations(companySlug: companySlug, originalURL: originalURL) {
+            if indicators.workday + indicators.beamery == 0, let result = await probeWorkdayVariations(companySlug: companySlug, originalURL: originalURL) {
                 return result
             }
             
@@ -321,7 +327,7 @@ actor ATSDetectorService {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
         
-        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        let (data, httpResponse) = try await session.data(for: request)
         
         guard let response = httpResponse as? HTTPURLResponse,
               (200...299).contains(response.statusCode) else {
@@ -331,12 +337,15 @@ actor ATSDetectorService {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let jobs = json["jobs"] as? [[String: Any]],
               !jobs.isEmpty,
-              let firstJob = jobs.first,
-              let absoluteUrl = firstJob["absolute_url"] as? String else {
+              let boardIndex = url.pathComponents.firstIndex(of: "boards"),
+              url.pathComponents.indices.contains(boardIndex + 1) else {
             throw FetchError.invalidResponse
         }
         
-        let baseUrl = extractGreenhouseBaseUrl(from: absoluteUrl)
+        // Application links can use a company's own domain. Keep the verified
+        // board token so GreenhouseFetcher can query the same API successfully.
+        let boardSlug = url.pathComponents[boardIndex + 1]
+        let baseUrl = "https://job-boards.greenhouse.io/\(boardSlug)"
         
         return DetectionResult(
             source: .greenhouse,
@@ -345,24 +354,6 @@ actor ATSDetectorService {
             actualATSUrl: baseUrl,
             message: "Found Greenhouse via API: \(baseUrl)"
         )
-    }
-    
-    private func extractGreenhouseBaseUrl(from jobUrl: String) -> String {
-        if let url = URL(string: jobUrl) {
-            var pathComponents = url.pathComponents.filter { $0 != "/" }
-            
-            if let lastComponent = pathComponents.last, Int(lastComponent) != nil {
-                pathComponents.removeLast()
-            }
-            
-            if pathComponents.last == "jobs" {
-                pathComponents.removeLast()
-            }
-            
-            let basePath = "/" + pathComponents.joined(separator: "/")
-            return "\(url.scheme ?? "https")://\(url.host ?? "")\(basePath)"
-        }
-        return jobUrl
     }
     
     // MARK: - Lever Probing
@@ -390,7 +381,7 @@ actor ATSDetectorService {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
         
-        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        let (data, httpResponse) = try await session.data(for: request)
         
         guard let response = httpResponse as? HTTPURLResponse,
               (200...299).contains(response.statusCode) else {
@@ -438,7 +429,7 @@ actor ATSDetectorService {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
         
-        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        let (data, httpResponse) = try await session.data(for: request)
         
         guard let response = httpResponse as? HTTPURLResponse,
               (200...299).contains(response.statusCode),
@@ -501,7 +492,7 @@ actor ATSDetectorService {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 5
         
-        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        let (data, httpResponse) = try await session.data(for: request)
         
         guard let response = httpResponse as? HTTPURLResponse,
               (200...299).contains(response.statusCode) || response.statusCode == 301 || response.statusCode == 302,
@@ -548,7 +539,7 @@ actor ATSDetectorService {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
 
-        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        let (data, httpResponse) = try await session.data(for: request)
 
         guard let response = httpResponse as? HTTPURLResponse,
               (200...299).contains(response.statusCode),
@@ -596,7 +587,7 @@ actor ATSDetectorService {
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 10
 
-        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        let (data, httpResponse) = try await session.data(for: request)
 
         guard let response = httpResponse as? HTTPURLResponse,
               (200...299).contains(response.statusCode),
@@ -709,7 +700,7 @@ actor ATSDetectorService {
         }
         
         if let redirectUrl = findMetaRedirect(in: html) {
-            if let source = JobSource.detectFromURL(redirectUrl) {
+            if let source = JobSource.detectFromURL(redirectUrl), source != .unknown {
                 return DetectionResult(
                     source: source,
                     confidence: .likely,
@@ -721,7 +712,7 @@ actor ATSDetectorService {
         }
         
         if let jsRedirect = findJavaScriptRedirect(in: html) {
-            if let source = JobSource.detectFromURL(jsRedirect) {
+            if let source = JobSource.detectFromURL(jsRedirect), source != .unknown {
                 return DetectionResult(
                     source: source,
                     confidence: .likely,
@@ -837,7 +828,7 @@ actor ATSDetectorService {
                 
                 let foundUrl = String(searchableHTML[range])
                 
-                if let source = JobSource.detectFromURL(foundUrl) {
+                if let source = JobSource.detectFromURL(foundUrl), source != .unknown {
                     var normalizedUrl = foundUrl
                     if source == .ashby {
                         normalizedUrl = normalizeAshbyUrl(foundUrl)
@@ -905,7 +896,7 @@ extension ATSDetectorService {
 
         // Render only after deterministic checks fail.
         let deterministicResult = try await detectATS(from: url)
-        if deterministicResult.source != nil {
+        if let source = deterministicResult.source, source != .unknown {
             return deterministicResult
         }
 
@@ -924,7 +915,7 @@ extension ATSDetectorService {
 
             let webView = WKWebView()
             let navigationDelegate = ATSNavigationDelegate { detectedURL in
-                if let source = JobSource.detectFromURL(detectedURL) {
+                if let source = JobSource.detectFromURL(detectedURL), source != .unknown {
                     let result = DetectionResult(
                         source: source,
                         confidence: .certain,
