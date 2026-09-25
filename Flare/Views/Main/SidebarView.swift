@@ -13,6 +13,14 @@ struct SidebarView: View {
     @ObservedObject private var boardMonitor = JobBoardMonitor.shared
     @Binding var sidebarVisible: Bool
     let isWindowMinimized: Bool
+
+    private let destinations = [
+        (title: "Jobs", icon: "list.bullet", tab: "jobs"),
+        (title: "Job Boards", icon: "globe", tab: "boards"),
+        (title: "HiringCafe Daily", icon: "magnifyingglass", tab: "hiring-cafe"),
+        (title: "Board Guide", icon: "questionmark.circle", tab: "board-guide"),
+        (title: "Settings", icon: "gear", tab: "settings")
+    ]
     
     var body: some View {
         VStack(spacing: 20) {
@@ -49,62 +57,28 @@ struct SidebarView: View {
             }
             
             VStack(spacing: 10) {
-                SidebarButton(
-                    title: "Jobs",
-                    icon: "list.bullet",
-                    badge: jobManager.allJobs.isEmpty ? nil : "\(jobManager.allJobs.count)",
-                    isSelected: jobManager.selectedTab == "jobs"
-                ) {
-                    jobManager.selectedTab = "jobs"
-                    if isWindowMinimized {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            sidebarVisible = false
+                ForEach(destinations, id: \.tab) { destination in
+                    SidebarButton(
+                        title: destination.title,
+                        icon: destination.icon,
+                        badge: destination.tab == "jobs" && !jobManager.allJobs.isEmpty
+                            ? "\(jobManager.allJobs.count)"
+                            : nil,
+                        isSelected: jobManager.selectedTab == destination.tab
+                    ) {
+                        jobManager.selectedTab = destination.tab
+                        if destination.tab != "jobs" {
+                            jobManager.selectedJob = nil
                         }
-                    }
-                }
-                
-                SidebarButton(
-                    title: "Job Boards",
-                    icon: "globe",
-                    isSelected: jobManager.selectedTab == "boards"
-                ) {
-                    jobManager.selectedTab = "boards"
-                    jobManager.selectedJob = nil
-                    if isWindowMinimized {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            sidebarVisible = false
-                        }
-                    }
-                }
-
-                SidebarButton(
-                    title: "Board Guide",
-                    icon: "questionmark.circle",
-                    isSelected: jobManager.selectedTab == "board-guide"
-                ) {
-                    jobManager.selectedTab = "board-guide"
-                    jobManager.selectedJob = nil
-                    if isWindowMinimized {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            sidebarVisible = false
-                        }
-                    }
-                }
-                
-                SidebarButton(
-                    title: "Settings",
-                    icon: "gear",
-                    isSelected: jobManager.selectedTab == "settings"
-                ) {
-                    jobManager.selectedTab = "settings"
-                    jobManager.selectedJob = nil
-                    if isWindowMinimized {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            sidebarVisible = false
+                        if isWindowMinimized {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                sidebarVisible = false
+                            }
                         }
                     }
                 }
             }
+            .layoutPriority(2)
             
             Spacer()
             
@@ -182,6 +156,8 @@ struct SidebarButton: View {
                     .frame(width: 20)
                 Text(title)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 Spacer()
                 if let badge = badge {
                     Text(badge)
@@ -199,6 +175,7 @@ struct SidebarButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityIdentifier("sidebar.\(title.lowercased().replacingOccurrences(of: " ", with: "-"))")
     }
 }

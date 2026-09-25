@@ -38,6 +38,12 @@ final class MSJobMonitorUITests: XCTestCase {
         app.buttons["sidebar.job-boards"].click()
         XCTAssertTrue(app.staticTexts["Job Boards"].waitForExistence(timeout: 3))
 
+        app.buttons["sidebar.hiringcafe-daily"].click()
+        XCTAssertTrue(app.staticTexts["HiringCafe Daily"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["hiring-cafe.reload"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.textFields["hiring-cafe.location"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.checkBoxes["hiring-cafe.include-remote"].waitForExistence(timeout: 3))
+
         app.buttons["sidebar.settings"].click()
         XCTAssertTrue(app.buttons["settings.check-for-updates"].waitForExistence(timeout: 3))
     }

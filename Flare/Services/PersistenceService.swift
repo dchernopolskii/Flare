@@ -113,6 +113,20 @@ actor PersistenceService {
         let ids = try JSONDecoder().decode([String].self, from: data)
         return Set(ids)
     }
+
+    // MARK: - HiringCafe Daily
+    func saveHiringCafeDailySnapshot(_ snapshot: HiringCafeDailySnapshot) throws {
+        let url = appSupportURL.appendingPathComponent("hiringCafeDaily.json")
+        let data = try JSONEncoder().encode(snapshot)
+        try writeAtomically(data, to: url)
+    }
+
+    func loadHiringCafeDailySnapshot() throws -> HiringCafeDailySnapshot? {
+        let url = appSupportURL.appendingPathComponent("hiringCafeDaily.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(HiringCafeDailySnapshot.self, from: data)
+    }
     
     // MARK: - Favorties
     func saveStarredJobIds(_ ids: Set<String>) async throws {
@@ -144,6 +158,7 @@ actor PersistenceService {
             let name = url.lastPathComponent
             return name == "jobs.json"
                 || name == "storedIds.json"
+                || name == "hiringCafeDaily.json"
                 || name == "job-tracking.json"
                 || name.hasSuffix("JobTracking.json")
                 || name.hasSuffix("JobIds.json")

@@ -37,6 +37,32 @@ class NotificationService: NSObject {
             await sendMultipleJobsNotification(newJobs)
         }
     }
+
+    func sendHiringCafeDailyNotification(for jobs: [HiringCafeDailyJob]) async {
+        guard !jobs.isEmpty else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = jobs.count == 1 ? "New HiringCafe Daily Match" : "\(jobs.count) New HiringCafe Daily Matches"
+        content.subtitle = jobs[0].title
+        content.body = jobs.count == 1
+            ? "\(jobs[0].company) · \(jobs[0].location)"
+            : jobs.prefix(3).map(\.title).joined(separator: "\n")
+        content.sound = .default
+        if let url = jobs[0].url?.absoluteString {
+            content.userInfo = ["externalURL": url]
+        }
+
+        let request = UNNotificationRequest(
+            identifier: "hiring-cafe-\(jobs[0].id)",
+            content: content,
+            trigger: nil
+        )
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+        } catch {
+            print("[Notification] Failed to send HiringCafe notification: \(error.localizedDescription)")
+        }
+    }
     
     private func sendSingleJobNotification(_ job: Job) async {
         let content = UNMutableNotificationContent()
@@ -109,7 +135,10 @@ extension NotificationService: UNUserNotificationCenterDelegate {
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
 
         let userInfo = response.notification.request.content.userInfo
-        if let jobId = userInfo["jobId"] as? String {
+        if let urlString = userInfo["externalURL"] as? String,
+           let url = URL(string: urlString) {
+            NSWorkspace.shared.open(url)
+        } else if let jobId = userInfo["jobId"] as? String {
             Task { @MainActor in
                 (NSApplication.shared.delegate as? AppDelegate)?.showMainWindow()
                 JobManager.shared.selectJob(withId: jobId)

@@ -40,6 +40,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         Task {
             await JobManager.shared.startMonitoring()
+            await HiringCafeDailyStore.shared.start()
         }
     }
 

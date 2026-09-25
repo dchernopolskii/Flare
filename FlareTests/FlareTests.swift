@@ -7,6 +7,118 @@ import Testing
 import Foundation
 @testable import FlareJobMonitor
 
+@Suite("HiringCafe Daily")
+struct HiringCafeDailyTests {
+    @Test("parses the server-rendered daily payload")
+    func parsesNextData() throws {
+        let html = #"""
+        <html><body>
+        <script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"jobs":[{"path":"/job/product-manager-example-seattle-abc123","title":"Product Manager","company":"Example","location":"Seattle, Washington, United States","category":"Product","postedAt":"2026-08-18T12:00:00.000Z"}],"page":1}}}
+        </script>
+        </body></html>
+        """#
+
+        let page = try HiringCafeDailyParser.parsePage(html: html)
+
+        #expect(page.page == 1)
+        #expect(page.jobs.count == 1)
+        #expect(page.jobs[0].title == "Product Manager")
+        #expect(page.jobs[0].url?.absoluteString == "https://hiringcafe.com/job/product-manager-example-seattle-abc123")
+    }
+
+    @Test("parses live jobs from the public search payload")
+    func parsesLiveJobs() throws {
+        let html = #"""
+        <script id="__NEXT_DATA__" type="application/json">
+        {"props":{"pageProps":{"ssrHits":[{"requisition_id":"live123","job_information":{"title":"Engineering Manager"},"v5_processed_job_data":{"company_name":"Example","formatted_workplace_location":"Seattle, Washington, United States","workplace_type":"Remote","job_category":"Engineering Management","estimated_publish_date":"2026-08-20T17:58:58.829Z"}}]}}}
+        </script>
+        """#
+
+        let page = try HiringCafeDailyParser.parseLivePage(html: html)
+        let jobs = page.jobs
+
+        #expect(page.page == 1)
+        #expect(jobs.count == 1)
+        #expect(jobs[0].path == "/job/live123")
+        #expect(jobs[0].id == "live123")
+        #expect(jobs[0].location == "Seattle, Washington, United States, Remote")
+        #expect(jobs[0].matches(query: "engineering manager", locationQuery: "Seattle", includeRemote: true))
+    }
+
+    @Test("uses the requisition suffix as the stable ID")
+    func canonicalizesJobID() {
+        let job = HiringCafeDailyJob(
+            path: "/job/engineering-manager-example-seattle-live123",
+            title: "Engineering Manager",
+            company: "Example",
+            location: "Seattle",
+            category: "Engineering",
+            postedAt: Date()
+        )
+
+        #expect(job.id == "live123")
+    }
+
+    @Test("requires every comma-separated search term")
+    func matchesAllSearchTerms() {
+        let job = HiringCafeDailyJob(
+            path: "/job/product-manager-example-seattle-abc123",
+            title: "Product Manager",
+            company: "Example",
+            location: "Seattle, Washington, United States",
+            category: "Product",
+            postedAt: Date()
+        )
+
+        #expect(job.matches(query: "manager", locationQuery: "Seattle"))
+        #expect(job.matches(query: "manager product", locationQuery: "Washington"))
+        #expect(job.matches(query: "example, product"))
+        #expect(!job.matches(query: "manager", locationQuery: "Portland"))
+    }
+
+    @Test("does not confuse title prefixes and can include remote jobs")
+    func rejectsSubstringAndIncludesRemote() {
+        let productionJob = HiringCafeDailyJob(
+            path: "/job/assistant-production-manager-sequim-abc123",
+            title: "Assistant Production Manager",
+            company: "Example",
+            location: "Sequim, Washington, United States",
+            category: "Business Operations",
+            postedAt: Date()
+        )
+        let productJob = HiringCafeDailyJob(
+            path: "/job/product-manager-seattle-def456",
+            title: "Product Manager",
+            company: "Example",
+            location: "Seattle, Washington, United States",
+            category: "Product",
+            postedAt: Date()
+        )
+        let remoteProductJob = HiringCafeDailyJob(
+            path: "/job/product-manager-remote-ghi789",
+            title: "Product Manager",
+            company: "Example",
+            location: "Remote",
+            category: "Product",
+            postedAt: Date()
+        )
+
+        #expect(!productionJob.matches(query: "product manager", locationQuery: "Seattle"))
+        #expect(productionJob.matches(query: "production manager", locationQuery: "Seattle"))
+        #expect(productJob.matches(query: "product manager", locationQuery: "Seattle"))
+        #expect(!remoteProductJob.matches(query: "product manager", locationQuery: "Seattle"))
+        #expect(remoteProductJob.matches(query: "product manager", locationQuery: "Seattle", includeRemote: true))
+    }
+
+    @Test("rejects pages without Next.js data")
+    func rejectsMissingNextData() {
+        #expect(throws: HiringCafeDailyError.self) {
+            try HiringCafeDailyParser.parsePage(html: "<html></html>")
+        }
+    }
+}
+
 @Suite("HTML pagination policy")
 struct HTMLPaginationPolicyTests {
     private let initialURL = URL(string: "https://careers.example.com/jobs/")!
