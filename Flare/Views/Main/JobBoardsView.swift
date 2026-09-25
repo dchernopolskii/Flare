@@ -46,6 +46,24 @@ struct JobBoardsView: View {
             
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Built-in sources", systemImage: "building.2")
+                            .font(.headline)
+                        Text("These sources refresh separately from your saved boards. Turn them off here to stop their updates. Previously downloaded jobs stay in your history.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("Microsoft", isOn: $jobManager.enableMicrosoft)
+                        Toggle("Apple", isOn: $jobManager.enableApple)
+                        Toggle("Google", isOn: $jobManager.enableGoogle)
+                        Toggle("TikTok", isOn: $jobManager.enableTikTok)
+                        Toggle("Snap", isOn: $jobManager.enableSnap)
+                        Toggle("AMD", isOn: $jobManager.enableAMD)
+                        Toggle("Meta", isOn: $jobManager.enableMeta)
+                    }
+                    .toggleStyle(.switch)
+                    .padding()
+                    .background(FlareVisual.paper, in: RoundedRectangle(cornerRadius: 8))
+
                     ImportExportSection(
                         showImportDialog: $showImportDialog,
                         showExportDialog: $showExportDialog,

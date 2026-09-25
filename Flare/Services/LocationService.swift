@@ -263,10 +263,22 @@ enum LocationMatcher {
     ]
 
     static func matches(_ job: Job, locationKeywords: [String]) -> Bool {
+        matches(
+            location: job.location,
+            workSiteFlexibility: job.workSiteFlexibility,
+            locationKeywords: locationKeywords
+        )
+    }
+
+    static func matches(
+        location: String,
+        workSiteFlexibility: String? = nil,
+        locationKeywords: [String]
+    ) -> Bool {
         let keywords = locationKeywords.map(normalize).filter { !$0.isEmpty }
         guard !keywords.isEmpty else { return true }
 
-        let values = [job.location, job.workSiteFlexibility ?? ""]
+        let values = [location, workSiteFlexibility ?? ""]
             .map(normalize)
             .filter { !$0.isEmpty }
 

@@ -317,6 +317,9 @@ class JobManager: ObservableObject {
         for binding in sourceBindings {
             binding.publisher
                 .sink { [weak self] enabled in
+                    if !enabled {
+                        self?.updateFetchStatistic(for: binding.source, count: 0)
+                    }
                     guard self?.isMonitoring == true else { return }
                     if enabled {
                         self?.startMonitoringSource(binding.source)
@@ -466,8 +469,8 @@ class JobManager: ObservableObject {
             let jobs = try await fetchFromSource(source)
             let newJobs = filterNewJobs(jobs)
 
-            if let path = statsPath {
-                fetchStatistics[keyPath: path] = jobs.count
+            if statsPath != nil {
+                updateFetchStatistic(for: source, count: jobs.count)
             }
             tracker.successFetch(source: name, jobCount: jobs.count)
 
@@ -893,6 +896,7 @@ class JobManager: ObservableObject {
     }
 
     private func updateFetchStatistic(for source: JobSource, count: Int) {
+        let count = enabledSourceStates().contains { $0.source == source && $0.enabled } ? count : 0
         switch source {
         case .microsoft: fetchStatistics.microsoftJobs = count
         case .apple: fetchStatistics.appleJobs = count
