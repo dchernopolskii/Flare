@@ -83,7 +83,10 @@ actor ModelDownloader {
         }
 
         isDownloading = true
-        defer { isDownloading = false }
+        defer {
+            isDownloading = false
+            downloadTask = nil
+        }
 
         print("[ModelDownloader] Starting download from: \(modelURL)")
         await MainActor.run {
@@ -108,7 +111,15 @@ actor ModelDownloader {
             // filesystem failures or wait until a multi-GB transfer finishes.
             try FileManager.default.createDirectory(at: modelDirectory, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: FileManager.default.temporaryDirectory, withIntermediateDirectories: true)
-            let (downloadedURL, response) = try await session.download(from: modelURL)
+            // The async URLSession download API does not deliver download
+            // progress callbacks on all supported macOS versions. Use an
+            // explicit delegate-driven task and bridge its result to async.
+            let (downloadedURL, response) = try await withCheckedThrowingContinuation { continuation in
+                delegate.completion = { continuation.resume(with: $0) }
+                let task = session.downloadTask(with: modelURL)
+                downloadTask = task
+                task.resume()
+            }
             defer { try? FileManager.default.removeItem(at: downloadedURL) }
 
             guard let httpResponse = response as? HTTPURLResponse else {
@@ -141,8 +152,7 @@ actor ModelDownloader {
 
     func cancelDownload() {
         downloadTask?.cancel()
-        downloadTask = nil
-        isDownloading = false
+        // Keep the in-flight guard until the task finishes cancelling.
         print("[ModelDownloader] Download cancelled")
     }
 
@@ -186,6 +196,8 @@ struct ModelDownloadProgress {
 
 private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
     let progressHandler: (Double, String) -> Void
+    // Installed before resume(); consumed only on the serial delegate queue.
+    var completion: ((Result<(URL, URLResponse), Error>) -> Void)?
 
     init(progressHandler: @escaping (Double, String) -> Void) {
         self.progressHandler = progressHandler
@@ -197,7 +209,32 @@ private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        progressHandler(1.0, "Processing...")
+        do {
+            guard let response = downloadTask.response else {
+                throw ModelDownloadError.invalidResponse
+            }
+            // URLSession removes location when this callback returns. Preserve
+            // it before resuming the actor that installs the downloaded model.
+            let stagingURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("flare-model-\(UUID().uuidString).download")
+            try FileManager.default.moveItem(at: location, to: stagingURL)
+            progressHandler(1.0, "Processing...")
+            finish(.success((stagingURL, response)))
+        } catch {
+            finish(.failure(error))
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            finish(.failure(error))
+        }
+    }
+
+    private func finish(_ result: Result<(URL, URLResponse), Error>) {
+        let handler = completion
+        completion = nil
+        handler?(result)
     }
 }
 
