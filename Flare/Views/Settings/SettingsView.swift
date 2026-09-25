@@ -30,6 +30,7 @@ struct SettingsView: View {
     @State private var isDownloadingModel = false
     @State private var downloadProgress: Double = 0.0
     @State private var downloadStatus: String = ""
+    @State private var modelDownloadError: String?
     @State private var modelSize: Double? = nil
     @State private var showCacheCleanupConfirmation = false
     @State private var cacheCleanupMessage: String?
@@ -119,6 +120,13 @@ struct SettingsView: View {
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
                                         }
+                                    }
+
+                                    if let modelDownloadError {
+                                        Text(modelDownloadError)
+                                            .font(.caption)
+                                            .foregroundColor(.red)
+                                            .textSelection(.enabled)
                                     }
 
                                     HStack {
@@ -558,7 +566,9 @@ struct SettingsView: View {
 
     private func downloadModel() {
         Task {
+            guard !isDownloadingModel else { return }
             isDownloadingModel = true
+            modelDownloadError = nil
             downloadProgress = 0.0
             downloadStatus = "Starting download..."
 
@@ -575,7 +585,7 @@ struct SettingsView: View {
             } catch {
                 print("[Settings] Model download failed: \(error)")
                 isDownloadingModel = false
-                downloadStatus = "Download failed: \(error.localizedDescription)"
+                modelDownloadError = "Download failed: \(error.localizedDescription)"
             }
         }
     }
